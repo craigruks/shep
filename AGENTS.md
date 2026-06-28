@@ -58,13 +58,13 @@ Factory.Application (Supervisor, one_for_one)
 Operational recipes live in `just/factory.just`. Key commands:
 
 ```bash
-just foreman-run          # Start orchestrator (background, idempotent)
-just foreman-stop         # Stop orchestrator
-just foreman-view         # tmux: orchestrator + auto-spawning task panes
-just foreman-tail <id>    # Tail a single task's stdout
-just foreman-pause <id>   # Pause task (preserves worktree + session)
-just foreman-resume <id>  # Resume paused task (--continue)
-just foreman-takeover <id># Pause → interactive Claude → offer resume
+just factory-daemon          # Start orchestrator (background, idempotent)
+just factory-daemon-stop         # Stop orchestrator
+just factory-view         # tmux: orchestrator + auto-spawning task panes
+just factory-tail <id>    # Tail a single task's stdout
+just factory-pause <id>   # Pause task (preserves worktree + session)
+just factory-resume <id>  # Resume paused task (--continue)
+just factory-takeover <id># Pause → interactive Claude → offer resume
 just factory-status       # JSON: running, paused, claimed, totals
 ```
 

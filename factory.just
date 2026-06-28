@@ -68,7 +68,7 @@ factory-run:
 
 # Start factory orchestrator in background — kills any existing instance first
 [group('factory')]
-foreman-run:
+factory-daemon:
   #!/usr/bin/env bash
   set -e
   cd factory && eval "$(mise env)"
@@ -87,12 +87,12 @@ foreman-run:
     > .factory/orchestrator.log 2>&1 &
   echo $! > .factory/orchestrator.pid
   echo "Orchestrator started (pid $!)"
-  echo "  just foreman-view    — watch orchestrator + tasks"
-  echo "  just foreman-stop    — stop orchestrator"
+  echo "  just factory-view    — watch orchestrator + tasks"
+  echo "  just factory-daemon-stop    — stop orchestrator"
 
 # Stop the factory orchestrator
 [group('factory')]
-foreman-stop:
+factory-daemon-stop:
   #!/usr/bin/env bash
   set -e
   PID_FILE="factory/.factory/orchestrator.pid"
@@ -116,17 +116,17 @@ factory-status:
 
 # Pause a running factory task (preserves worktree + session)
 [group('factory')]
-foreman-pause task-id:
+factory-pause task-id:
   cd factory && eval "$(mise env)" && mix factory.pause --task {{task-id}}
 
 # Resume a paused factory task (continues Claude session)
 [group('factory')]
-foreman-resume task-id:
+factory-resume task-id:
   cd factory && eval "$(mise env)" && mix factory.resume --task {{task-id}}
 
 # Take over a running task — pause, open Claude session, offer resume on exit
 [group('factory')]
-foreman-takeover task-id:
+factory-takeover task-id:
   #!/usr/bin/env bash
   set -e
   cd factory && eval "$(mise env)"
@@ -144,18 +144,17 @@ foreman-takeover task-id:
   if [[ $REPLY =~ ^[Yy]$ ]]; then
     cd factory && mix factory.resume --task {{task-id}}
   else
-    echo "Task {{task-id}} remains paused. Run 'just foreman-resume {{task-id}}' when ready."
+    echo "Task {{task-id}} remains paused. Run 'just factory-resume {{task-id}}' when ready."
   fi
 
 # Tail a specific factory task's raw output
 [group('factory')]
-foreman-tail task-id:
+factory-tail task-id:
   tail -f factory/.factory/runs/{{task-id}}.stdout.log
 
-# View factory: orchestrator log + auto-spawning task panes in tmux
-# New panes appear automatically as tasks are dispatched
+# Watch factory in tmux: orchestrator log + task panes that auto-spawn as tasks dispatch
 [group('factory')]
-foreman-view:
+factory-view:
   #!/usr/bin/env bash
   set -e
   cd factory
