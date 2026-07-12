@@ -2,7 +2,8 @@
 # Left pane: the Shep daemon log. Right pane: the human.
 # Regenerate with: vhs assets/demo.tape
 # Prereqs: labels created, WORKFLOW.md pointed at this repo with the
-# stub agent (see priv/demo/), daemon down, no open shep issues/PRs.
+# stub agent (Shep.Demo generates one; see lib/shep/demo.ex), daemon down,
+# and no open shep issues/PRs.
 # The daemon pushes over https (SSH agents do not reach nohup daemons):
 #   gh auth setup-git
 #   git config url."https://github.com/<you>/".insteadOf "git@github.com:<you>/"

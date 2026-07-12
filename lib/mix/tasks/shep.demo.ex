@@ -14,7 +14,8 @@ defmodule Mix.Tasks.Shep.Demo do
   @impl true
   def run(_args) do
     Application.put_env(:logger, :level, :warning)
-    Application.put_env(:shep, :workflow_path, "priv/demo/WORKFLOW.md")
+    scaffold = Shep.Demo.scaffold()
+    Application.put_env(:shep, :workflow_path, scaffold.workflow)
     Mix.Task.run("app.start")
 
     task = demo_task()
@@ -30,6 +31,7 @@ defmodule Mix.Tasks.Shep.Demo do
     :ok = Shep.Orchestrator.submit(task)
     wait_for_completion(task.id, @timeout_ms)
     cleanup_branch(task.branch)
+    Shep.Demo.cleanup(scaffold)
     print_outcome(task)
   end
 
