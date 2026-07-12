@@ -38,6 +38,22 @@ not a frozen terminal.
 
 The whistle is the label. The dog does the running.
 
+## The first production run
+
+Shep's first task after leaving home was deleting its own predecessor:
+the in-repo orchestrator it was extracted from, still sitting in the
+monorepo that raised it. Issue labeled `shep`, agent dispatched into an
+isolated worktree, 74 files and 4,526 lines removed, PR opened, CI
+watched to green. Label to PR: 7.5 minutes. Label to green CI: about
+eleven.
+
+The goal loop earned its keep on attempt one. The agent said done, but
+the verify command came back red in the worktree, so Shep sent the
+failure output back to the same session for a fix turn. No red commit
+ever reached CI. That monorepo is private, so no link, but the receipts
+are the point: this repo is not a mockup of an orchestrator, and its
+first PR retired its ancestor.
+
 ## Lineage
 
 Shep didn't come from nowhere. The story has a false start in it: the first
@@ -93,7 +109,7 @@ never met your bugs.
         │ labels move:          │ retry w/ backoff           │
         │ shep:in-progress      │ idle watchdog              │
         │ shep:in-review  ◄─────┴──── CI passed ◄────────────┘
-        │ shep:failed     ◄────────── CI failed (3 retries + Slack)
+        │ shep:failed     ◄────────── CI failed (fix turns + Slack)
 ```
 
 One `Task.Supervisor` child per issue. Each agent gets:
@@ -166,6 +182,8 @@ concurrency, timeouts, or the tracker while Shep is running. No restarts.
 > do not reach a nohup'd process. Give it non-interactive push auth once:
 > `gh auth setup-git`, and if your remote uses SSH,
 > `git config url."https://github.com/<you>/".insteadOf "git@github.com:<you>/"`.
+> While you're in there, set the repo's `user.email` to your GitHub noreply
+> address, or GH007 email privacy will reject the daemon's first push.
 
 ```yaml
 tracker:   { kind: "github", repo: "you/your-repo" }
@@ -175,6 +193,22 @@ goal:      { verify: "mix quality", verify_fixes: 2, ci_fixes: 2 }
 hooks:     { on_worktree_ready: "pnpm install --frozen-lockfile" }
 staging:   { base_branch: "staging", pr_target: "staging" }
 ```
+
+## Shepherding another repo
+
+Shep cuts worktrees from `workspace.repo`, which does not have to be the
+checkout Shep sits in. Point it at any local clone (bare repos work),
+keep one config file per flock, and select it at startup:
+
+```yaml
+workspace: { root: ~/code/shep_worktrees, repo: /path/to/that/repo }
+```
+
+```sh
+SHEP_WORKFLOW=.shep/WORKFLOW.thatrepo.md just shep up
+```
+
+One dog, many flocks. The tracked `WORKFLOW.md` stays a placeholder.
 
 ## Commands (speak dog)
 
@@ -219,13 +253,33 @@ labels and logs.
 | `shep:in-progress` | claimed, agent running |
 | `shep:pr-created` | branch pushed, PR open |
 | `shep:in-review` | CI green; a human should look |
-| `shep:failed` | CI red after 3 retries; reason posted as a comment |
+| `shep:failed` | goal not reached after capped fix attempts; reason posted as a comment |
 | `shep:promoted` | shipped |
 | `shep:codex` | route this issue to Codex instead of Claude |
 | `shep:no-merge` | open the PR but skip CI-watch / auto-merge labels |
 
 Dependencies work too: put `Depends on: #12, #45` in an issue body and Shep
 won't dispatch it until those are `shep:in-review` or better.
+
+## The three layers (running Shep with a handler)
+
+At a sheepdog trial, the handler works the dog and the farmer owns the
+flock. Same here, and each layer owns a different failure class:
+
+| layer | role | owns |
+|---|---|---|
+| agents | do the work | wrong code (fix turns) |
+| Shep | mechanical supervision | known failures: crash, stall, red CI |
+| the handler | an agent session operating Shep | unknown failures: auth, config drift, new failure classes |
+| you | intent and merge authority | judgment |
+
+The handler is optional and event-driven, not a vigil. Routine runs need
+no observer; Slack pings you on stall or failure. Sit a session down only
+for first runs on a new repo or after config changes. Its prime
+directive: every intervention ends as a commit (a code fix, a config
+change, or a playbook line), so Shep's autonomy grows and the handler
+gets quieter over time. The playbook lives in [`AGENTS.md`](AGENTS.md),
+which is exactly the file an arriving agent reads first.
 
 ## Ethos
 
@@ -242,7 +296,7 @@ won't dispatch it until those are `shep:in-review` or better.
   3 attempts. Stalled agent → watchdog kill + Slack ping. Failed task → the
   worktree is *preserved* for post-mortem; successes are pruned.
 - **No mocking framework.** Behaviours + test adapters (`Tracker.Memory`).
-  97 tests, `mix quality` = format + credo --strict + test. Files < 300 lines.
+  111 tests, `mix quality` = format + credo --strict + test. Files < 300 lines.
 - **Small enough to read.** ~3k lines of lib. You can read the whole thing
   with your coffee. That's not a limitation; that's the pitch.
 
