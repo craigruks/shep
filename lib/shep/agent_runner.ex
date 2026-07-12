@@ -335,6 +335,11 @@ defmodule Shep.AgentRunner do
     end
   end
 
+  @doc false
+  def run_verify_loop_for_test(final, task, wt, config, opid) do
+    run_verify_loop(final, task, wt, config, opid)
+  end
+
   # ── Goal: CI fix loop (post-PR) ──
 
   defp run_ci_loop(final, _pr_url, %{no_merge: true} = task, _wt, _config, _pid) do
