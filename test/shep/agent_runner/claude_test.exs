@@ -61,6 +61,29 @@ defmodule Shep.AgentRunner.ClaudeTest do
     end
   end
 
+  describe "model selection" do
+    test "nil model adds no flag" do
+      refute "--model" in Claude.build_args("p", "1")
+      refute "--model" in Claude.build_resume_args("1")
+    end
+
+    test "a configured model is passed on fresh, resume, and continue turns" do
+      for args <- [
+            Claude.build_args("p", "1", "opus"),
+            Claude.build_resume_args("1", "opus"),
+            Claude.build_continue_args("fix", "1", "opus")
+          ] do
+        i = Enum.find_index(args, &(&1 == "--model"))
+        assert i, "missing --model in #{inspect(args)}"
+        assert Enum.at(args, i + 1) == "opus"
+      end
+    end
+
+    test "the prompt stays last on continue turns with a model" do
+      assert ["-p", "fix"] == Enum.take(Claude.build_continue_args("fix", "1", "opus"), -2)
+    end
+  end
+
   test "session_name/1 is shep-<id>" do
     assert "shep-7" == Claude.session_name("7")
   end

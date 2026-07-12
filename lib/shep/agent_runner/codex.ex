@@ -4,15 +4,15 @@ defmodule Shep.AgentRunner.Codex do
   require Logger
 
   @doc "Build CLI args for a Codex invocation."
-  @spec build_args(String.t(), String.t()) :: [String.t()]
-  def build_args(prompt, _task_id) when is_binary(prompt) do
+  @spec build_args(String.t(), String.t(), String.t() | nil) :: [String.t()]
+  def build_args(prompt, _task_id, _model \\ nil) when is_binary(prompt) do
     Logger.warning("Codex agent support is experimental")
     ["exec", "-p", prompt]
   end
 
   @doc "Build CLI args for resuming a Codex session."
-  @spec build_resume_args(String.t()) :: [String.t()]
-  def build_resume_args(_task_id) do
+  @spec build_resume_args(String.t(), String.t() | nil) :: [String.t()]
+  def build_resume_args(_task_id, _model \\ nil) do
     Logger.warning("Codex resume is experimental")
     ["resume", "--last"]
   end

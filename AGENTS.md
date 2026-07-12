@@ -82,6 +82,9 @@ stub agent and a memory tracker; nothing is pushed.
 
 ## Agent Selection
 
+`agent.model` in WORKFLOW.md picks the Claude model (default "opus",
+the latest Opus alias; pin an exact id to freeze it). Hot-reloaded like
+all config.
 `shep:codex` label on GitHub issue → Codex CLI instead of Claude.
 Agent-specific modules: `AgentRunner.Claude`, `AgentRunner.Codex`.
 Claude sessions use `--name "shep-{id}"` for persistence.

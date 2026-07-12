@@ -170,7 +170,7 @@ concurrency, timeouts, or the tracker while Shep is running. No restarts.
 ```yaml
 tracker:   { kind: "github", repo: "you/your-repo" }
 workspace: { root: ~/code/shep_worktrees }
-agent:     { command: "claude", max_concurrent: 3, max_turns: 10 }
+agent:     { command: "claude", model: "opus", max_concurrent: 3, max_turns: 10 }
 goal:      { verify: "mix quality", verify_fixes: 2, ci_fixes: 2 }
 hooks:     { on_worktree_ready: "pnpm install --frozen-lockfile" }
 staging:   { base_branch: "staging", pr_target: "staging" }

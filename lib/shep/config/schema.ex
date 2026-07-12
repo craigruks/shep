@@ -11,6 +11,7 @@ defmodule Shep.Config.Schema do
     },
     "agent" => %{
       "command" => "claude",
+      "model" => "opus",
       "max_concurrent" => 3,
       "max_turns" => 10,
       "idle_timeout_ms" => 600_000,

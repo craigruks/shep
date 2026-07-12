@@ -110,7 +110,7 @@ defmodule Shep.AgentRunner do
 
   defp execute_resume_turns(worktree_path, task, orchestrator_pid, max_turns, config) do
     agent_cmd = agent_command(task.agent, config)
-    args = agent_module(task.agent).build_resume_args(task.id)
+    args = agent_module(task.agent).build_resume_args(task.id, agent_model(config))
     idle_ms = idle_timeout_ms(config)
 
     iteration =
@@ -137,27 +137,38 @@ defmodule Shep.AgentRunner do
   defp execute_turns(prompt, worktree_path, task, orchestrator_pid, max_turns, config) do
     agent_cmd = agent_command(task.agent, config)
     idle_ms = idle_timeout_ms(config)
-    do_turns(prompt, worktree_path, task, orchestrator_pid, agent_cmd, idle_ms, max_turns, 1, [])
+    model = agent_model(config)
+
+    do_turns(
+      prompt,
+      worktree_path,
+      task,
+      orchestrator_pid,
+      {agent_cmd, model, idle_ms},
+      max_turns,
+      1,
+      []
+    )
   end
 
-  defp do_turns(_prompt, _path, _task, _pid, _cmd, _idle_ms, max, turn, acc) when turn > max do
+  defp do_turns(_prompt, _path, _task, _pid, _agent, max, turn, acc) when turn > max do
     Enum.reverse(acc)
   end
 
-  defp do_turns(prompt, path, task, orchestrator_pid, cmd, idle_ms, max, turn, acc) do
-    iteration = run_single_turn(cmd, prompt, path, task, orchestrator_pid, idle_ms)
+  defp do_turns(prompt, path, task, orchestrator_pid, {cmd, model, idle_ms} = agent, max, turn, acc) do
+    iteration = run_single_turn(cmd, model, prompt, path, task, orchestrator_pid, idle_ms)
     new_acc = [iteration | acc]
 
     case iteration.completion do
       %Shep.Completion.Complete{} -> Enum.reverse(new_acc)
       %Shep.Completion.Failed{} -> Enum.reverse(new_acc)
       _ when turn >= max -> Enum.reverse(new_acc)
-      _ -> do_turns(prompt, path, task, orchestrator_pid, cmd, idle_ms, max, turn + 1, new_acc)
+      _ -> do_turns(prompt, path, task, orchestrator_pid, agent, max, turn + 1, new_acc)
     end
   end
 
-  defp run_single_turn(agent_cmd, prompt, cwd, task, orchestrator_pid, idle_ms) do
-    args = agent_module(task.agent).build_args(prompt, task.id)
+  defp run_single_turn(agent_cmd, model, prompt, cwd, task, orchestrator_pid, idle_ms) do
+    args = agent_module(task.agent).build_args(prompt, task.id, model)
     run_single_turn_with_args(agent_cmd, args, cwd, task, orchestrator_pid, idle_ms)
   end
 
@@ -170,6 +181,10 @@ defmodule Shep.AgentRunner do
 
   defp idle_timeout_ms(config) do
     get_in(config, ["agent", "idle_timeout_ms"]) || 600_000
+  end
+
+  defp agent_model(config) do
+    get_in(config, ["agent", "model"])
   end
 
   @doc "Resolve an agent command: bare names via PATH, paths relative to cwd."
@@ -414,7 +429,7 @@ defmodule Shep.AgentRunner do
 
   defp run_fix_turn(prompt, wt, task, config, opid) do
     agent_cmd = agent_command(task.agent, config)
-    args = Shep.AgentRunner.Claude.build_continue_args(prompt, task.id)
+    args = Shep.AgentRunner.Claude.build_continue_args(prompt, task.id, agent_model(config))
     run_single_turn_with_args(agent_cmd, args, wt, task, opid, idle_timeout_ms(config))
   end
 

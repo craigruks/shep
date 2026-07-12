@@ -16,6 +16,7 @@ defmodule Shep.Config.SchemaTest do
       {:ok, config} = Schema.validate(%{"agent" => %{"max_concurrent" => 1}})
       assert get_in(config, ["agent", "max_concurrent"]) == 1
       assert get_in(config, ["agent", "command"]) == "claude"
+      assert get_in(config, ["agent", "model"]) == "opus"
     end
   end
 
