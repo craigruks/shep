@@ -3,7 +3,7 @@ defmodule Shep.AgentRunner do
 
   require Logger
 
-  @max_line_length 65_536
+  alias Shep.AgentRunner.Exec
 
   @doc "Run a task end-to-end. Called inside a Task.Supervisor-spawned process."
   @spec run(Shep.Task.t(), pid(), map()) :: Shep.RunResult.t()
@@ -18,7 +18,7 @@ defmodule Shep.AgentRunner do
     case resolve_worktree(task, opts, config) do
       {:ok, worktree_path, resuming?} ->
         Logger.info("Worktree ready for task #{task.id}: #{worktree_path}")
-        session = agent_module(task.agent).session_name(task.id)
+        session = Exec.agent_module(task.agent).session_name(task.id)
 
         send(
           orchestrator_pid,
@@ -37,12 +37,23 @@ defmodule Shep.AgentRunner do
           end
 
         final = resolve_completion(iterations)
-        final = run_verify_loop(final, task, worktree_path, config, orchestrator_pid)
+        run_turn = fn prompt -> fix_turn(prompt, worktree_path, task, config, orchestrator_pid) end
+
+        final =
+          Shep.Goal.verify_loop(final, task, worktree_path, config, orchestrator_pid, run_turn)
 
         {final, pr_url} =
-          case create_pr(final, task, worktree_path, config) do
+          case Shep.AgentRunner.PR.create(final, task, worktree_path, config) do
             {:ok, url} ->
-              {run_ci_loop(final, url, task, worktree_path, config, orchestrator_pid), url}
+              {Shep.Goal.ci_loop(
+                 final,
+                 url,
+                 task,
+                 worktree_path,
+                 config,
+                 orchestrator_pid,
+                 run_turn
+               ), url}
 
             :none ->
               {final, nil}
@@ -110,7 +121,7 @@ defmodule Shep.AgentRunner do
 
   defp execute_resume_turns(worktree_path, task, orchestrator_pid, max_turns, config) do
     agent_cmd = agent_command(task.agent, config)
-    args = agent_module(task.agent).build_resume_args(task.id, agent_model(config))
+    args = Exec.agent_module(task.agent).build_resume_args(task.id, agent_model(config))
     idle_ms = idle_timeout_ms(config)
 
     iteration =
@@ -168,14 +179,14 @@ defmodule Shep.AgentRunner do
   end
 
   defp run_single_turn(agent_cmd, model, prompt, cwd, task, orchestrator_pid, idle_ms) do
-    args = agent_module(task.agent).build_args(prompt, task.id, model)
+    args = Exec.agent_module(task.agent).build_args(prompt, task.id, model)
     run_single_turn_with_args(agent_cmd, args, cwd, task, orchestrator_pid, idle_ms)
   end
 
   defp run_single_turn_with_args(agent_cmd, args, cwd, task, orchestrator_pid, idle_ms) do
-    case resolve_executable(agent_cmd) do
-      nil -> executable_not_found(agent_cmd)
-      exe -> run_port(exe, args, cwd, task, orchestrator_pid, idle_ms)
+    case Exec.resolve_executable(agent_cmd) do
+      nil -> Exec.executable_not_found(agent_cmd)
+      exe -> Exec.run(exe, args, cwd, task, orchestrator_pid, idle_ms)
     end
   end
 
@@ -187,120 +198,11 @@ defmodule Shep.AgentRunner do
     get_in(config, ["agent", "model"])
   end
 
-  @doc "Resolve an agent command: bare names via PATH, paths relative to cwd."
-  @spec resolve_executable(String.t()) :: String.t() | nil
-  def resolve_executable(cmd) do
-    if String.contains?(cmd, "/") do
-      path = Path.expand(cmd)
-      if File.exists?(path), do: path, else: nil
-    else
-      System.find_executable(cmd)
-    end
-  end
-
-  defp executable_not_found(agent_cmd) do
-    reason = "agent command not found: #{agent_cmd}"
-    Logger.error(reason)
-
-    %Shep.IterationResult{
-      stdout: "",
-      stderr: reason,
-      exit_code: 127,
-      completion: %Shep.Completion.Failed{reason: reason, recoverable: false},
-      duration_ms: 0
-    }
-  end
-
-  defp run_port(exe, args, cwd, task, orchestrator_pid, idle_ms) do
-    started_at = System.monotonic_time(:millisecond)
-
-    port =
-      Port.open({:spawn_executable, exe}, [
-        :binary,
-        :exit_status,
-        {:line, @max_line_length},
-        :stderr_to_stdout,
-        {:cd, cwd},
-        {:args, args}
-      ])
-
-    {stdout, exit_code} = collect_port_output(port, task.id, orchestrator_pid, idle_ms)
-    duration = System.monotonic_time(:millisecond) - started_at
-
-    completion =
-      stdout
-      |> String.split("\n")
-      |> Enum.find_value(&parse_completion_from_line(&1, task.agent))
-
-    %Shep.IterationResult{
-      stdout: stdout,
-      stderr: "",
-      exit_code: exit_code,
-      completion: completion,
-      duration_ms: duration
-    }
-  end
-
-  @doc false
-  def parse_completion_from_line_for_test(line), do: parse_completion_from_line(line, :claude)
-
-  defp parse_completion_from_line(line, agent) do
-    text = extract_text_from_json(line, agent)
-    Shep.Completion.parse(text)
-  end
-
-  defp extract_text_from_json(line, agent) do
-    agent_module(agent).extract_text(line)
-  end
-
-  defp agent_module(:claude), do: Shep.AgentRunner.Claude
-  defp agent_module(:codex), do: Shep.AgentRunner.Codex
-
   defp agent_command(:codex, _config), do: "codex"
 
   defp agent_command(_agent, config) do
     get_in(config, ["agent", "command"]) || "claude"
   end
-
-  @doc false
-  def collect_port_output_for_test(port, task_id, orchestrator_pid, idle_ms) do
-    collect_port_output(port, task_id, orchestrator_pid, idle_ms)
-  end
-
-  defp collect_port_output(port, task_id, orchestrator_pid, idle_ms) do
-    collect_port_output(port, task_id, orchestrator_pid, idle_ms, [], nil)
-  end
-
-  defp collect_port_output(port, task_id, orchestrator_pid, idle_ms, lines, exit_code) do
-    receive do
-      {^port, {:data, {:eol, line}}} ->
-        send(orchestrator_pid, {:agent_output, task_id, line})
-        :telemetry.execute([:shep, :agent, :stdout], %{}, %{task_id: task_id, line: line})
-        collect_port_output(port, task_id, orchestrator_pid, idle_ms, [line | lines], exit_code)
-
-      {^port, {:data, {:noeol, line}}} ->
-        collect_port_output(port, task_id, orchestrator_pid, idle_ms, [line | lines], exit_code)
-
-      {^port, {:exit_status, code}} ->
-        {lines |> Enum.reverse() |> Enum.join("\n"), code}
-    after
-      idle_ms ->
-        os_pid = Port.info(port, :os_pid)
-        Port.close(port)
-        kill_port_os_pid(os_pid)
-        {lines |> Enum.reverse() |> Enum.join("\n"), 137}
-    end
-  end
-
-  # Port.info/2 returns nil once the port is closed, so the pid is
-  # captured before Port.close/1. SIGKILL is best-effort: the process
-  # may already be gone.
-  defp kill_port_os_pid({:os_pid, os_pid}) do
-    System.cmd("kill", ["-9", Integer.to_string(os_pid)], stderr_to_stdout: true)
-    :ok
-  end
-
-  defp kill_port_os_pid(nil), do: :ok
 
   defp run_hooks(config, worktree_path) do
     Shep.Hooks.run_lifecycle(config, "on_worktree_ready", worktree_path)
@@ -319,198 +221,12 @@ defmodule Shep.AgentRunner do
     end
   end
 
-  # ── Goal: verify loop (pre-PR, cheapest failures first) ──
-
-  defp run_verify_loop(
-         %Shep.Completion.Complete{} = final,
-         %{demo: false, agent: :claude} = task,
-         worktree_path,
-         config,
-         orchestrator_pid
-       ) do
-    case get_in(config, ["goal", "verify"]) do
-      nil ->
-        final
-
-      verify_cmd ->
-        max = get_in(config, ["goal", "verify_fixes"]) || 2
-        do_verify(final, task, worktree_path, config, orchestrator_pid, verify_cmd, 0, max)
-    end
-  end
-
-  defp run_verify_loop(final, _task, _path, _config, _pid), do: final
-
-  defp do_verify(final, task, wt, config, opid, verify_cmd, attempt, max) do
-    send(opid, {:agent_output, task.id, "[goal] running verify (attempt #{attempt + 1})"})
-
-    case Shep.Goal.run_verify(verify_cmd, wt) do
-      {:ok, _out} ->
-        Logger.info("Verify passed for task #{task.id}")
-        final
-
-      {:error, out} when attempt < max ->
-        Logger.warning("Verify failed for task #{task.id}, fix turn #{attempt + 1}/#{max}")
-        prompt = Shep.Goal.fix_prompt(:verify, attempt + 1, max, out, verify_cmd)
-        iteration = run_fix_turn(prompt, wt, task, config, opid)
-
-        case iteration.completion do
-          %Shep.Completion.Failed{} = failed ->
-            failed
-
-          _ ->
-            do_verify(final, task, wt, config, opid, verify_cmd, attempt + 1, max)
-        end
-
-      {:error, out} ->
-        %Shep.Completion.Failed{
-          reason: "verify failed after #{max} fix attempts: #{Shep.Goal.tail(out, 400)}",
-          recoverable: false
-        }
-    end
-  end
-
-  @doc false
-  def run_verify_loop_for_test(final, task, wt, config, opid) do
-    run_verify_loop(final, task, wt, config, opid)
-  end
-
-  # ── Goal: CI fix loop (post-PR) ──
-
-  defp run_ci_loop(final, _pr_url, %{no_merge: true} = task, _wt, _config, _pid) do
-    Logger.info("Skipping CI watch for task #{task.id} (no-merge)")
-    final
-  end
-
-  defp run_ci_loop(final, pr_url, task, wt, config, opid) do
-    repo = get_in(config, ["tracker", "repo"])
-    pr_number = pr_url |> String.split("/") |> List.last()
-    max = get_in(config, ["goal", "ci_fixes"]) || 2
-    do_ci(final, repo, pr_number, task, wt, config, opid, 0, max)
-  end
-
-  defp do_ci(final, repo, pr, task, wt, config, opid, attempt, max) do
-    case Shep.CIWatch.watch(repo, pr, max_retries: 1) do
-      :passed ->
-        Logger.info("CI passed for task #{task.id}")
-        Shep.Tracker.update_status(task.id, "in-review")
-        final
-
-      {:failed, reason} when attempt < max and task.agent == :claude ->
-        Logger.warning("CI failed for task #{task.id}, fix turn #{attempt + 1}/#{max}: #{reason}")
-        logs = Shep.CIWatch.failure_logs(repo, pr)
-        prompt = Shep.Goal.fix_prompt(:ci, attempt + 1, max, logs, nil)
-        _iteration = run_fix_turn(prompt, wt, task, config, opid)
-
-        case push_branch(task, wt) do
-          :ok ->
-            do_ci(final, repo, pr, task, wt, config, opid, attempt + 1, max)
-
-          {:error, push_err} ->
-            give_up(task, "push failed during CI fix: #{Shep.Goal.tail(push_err, 300)}")
-        end
-
-      {:failed, reason} ->
-        give_up(task, "CI failed after #{attempt} fix attempts: #{reason}")
-    end
-  end
-
-  defp give_up(task, reason) do
-    Logger.error("Goal not reached for task #{task.id}: #{reason}")
-    Shep.Tracker.update_status(task.id, "failed")
-    Shep.Tracker.add_comment(task.id, "Goal not reached: #{reason}")
-    Shep.Notifier.notify_failure(task, reason)
-    %Shep.Completion.Failed{reason: reason, recoverable: false}
-  end
-
-  @doc false
-  def run_ci_loop_for_test(final, pr_url, task, wt, config, opid) do
-    run_ci_loop(final, pr_url, task, wt, config, opid)
-  end
-
-  defp run_fix_turn(prompt, wt, task, config, opid) do
+  @doc "Run a single fix turn: continue the agent session with a new prompt."
+  @spec fix_turn(String.t(), String.t(), Shep.Task.t(), map(), pid()) :: Shep.IterationResult.t()
+  def fix_turn(prompt, wt, task, config, opid) do
     agent_cmd = agent_command(task.agent, config)
     args = Shep.AgentRunner.Claude.build_continue_args(prompt, task.id, agent_model(config))
     run_single_turn_with_args(agent_cmd, args, wt, task, opid, idle_timeout_ms(config))
-  end
-
-  # ── Push and PR ──
-
-  defp create_pr(_completion, %{demo: true} = task, _path, _config) do
-    Logger.info("Demo task #{task.id}: skipping push and PR creation")
-    :none
-  end
-
-  defp create_pr(%Shep.Completion.Complete{summary: summary}, task, worktree_path, config) do
-    if Shep.Worktree.has_uncommitted_changes?(worktree_path) do
-      Logger.warning("Worktree has uncommitted changes, skipping PR")
-      :none
-    else
-      push_and_pr(task, summary, config, worktree_path)
-    end
-  end
-
-  defp create_pr(_completion, _task, _path, _config), do: :none
-
-  @doc false
-  def create_pr_for_test(completion, task, path, config) do
-    create_pr(completion, task, path, config)
-  end
-
-  defp push_branch(task, cwd) do
-    case System.cmd("git", ["push", "origin", task.branch], cd: cwd, stderr_to_stdout: true) do
-      {_, 0} -> :ok
-      {err, _} -> {:error, err}
-    end
-  end
-
-  defp push_and_pr(task, summary, config, cwd) do
-    repo = get_in(config, ["tracker", "repo"])
-    target = get_in(config, ["staging", "pr_target"]) || task.base_branch
-
-    case push_branch(task, cwd) do
-      :ok ->
-        label =
-          if task.no_merge,
-            do: "shep:no-merge",
-            else: "agent: claude-code"
-
-        pr_args = [
-          "pr",
-          "create",
-          "--repo",
-          repo,
-          "--base",
-          target,
-          "--head",
-          task.branch,
-          "--title",
-          "[Shep] #{task.id}: #{String.slice(summary, 0, 60)}",
-          "--body",
-          "## Summary\n\n#{summary}\n\n---\nGenerated by Shep (task #{task.id})"
-        ]
-
-        case Shep.GH.run(pr_args) do
-          {:ok, url} ->
-            Logger.info("PR created: #{url}")
-            apply_pr_label(repo, url, label)
-            Shep.Tracker.update_status(task.id, "pr-created")
-            {:ok, url}
-
-          {:error, err} ->
-            {:error, "PR creation failed: #{err}"}
-        end
-
-      {:error, err} ->
-        {:error, "push failed: #{err}"}
-    end
-  end
-
-  # Best-effort: a missing label in the target repo must never sink the PR.
-  defp apply_pr_label(repo, pr_url, label) do
-    case Shep.GH.run(["pr", "edit", pr_url, "--repo", repo, "--add-label", label]) do
-      {:ok, _} -> :ok
-      {:error, err} -> Logger.warning("Could not label PR (#{label}): #{err}")
-    end
   end
 
   defp cleanup_worktree(path, completion, config) do

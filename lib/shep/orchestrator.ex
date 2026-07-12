@@ -5,9 +5,8 @@ defmodule Shep.Orchestrator do
 
   require Logger
 
-  alias Shep.Orchestrator.Dispatch
+  alias Shep.Orchestrator.{Dispatch, Poller, Snapshot}
 
-  @ets_table :shep_state
   @dialyzer {:nowarn_function, init: 1}
 
   defstruct [
@@ -50,21 +49,16 @@ defmodule Shep.Orchestrator do
 
   @doc "Get a snapshot of orchestrator state."
   @spec snapshot() :: map()
-  def snapshot do
-    case :ets.lookup(@ets_table, :state) do
-      [{:state, data}] -> data
-      [] -> %{running: %{}}
-    end
-  end
+  def snapshot, do: Snapshot.read()
 
   @impl true
   def init(_opts) do
     Process.flag(:trap_exit, true)
-    :ets.new(@ets_table, [:named_table, :public, :set])
+    Snapshot.new()
     state = %__MODULE__{}
-    reconcile_worktrees()
-    write_ets(state)
-    state = schedule_tick(state)
+    Poller.reconcile_worktrees()
+    Snapshot.write(state)
+    state = Poller.schedule_tick(state)
     Logger.info("Orchestrator started")
     {:ok, state}
   end
@@ -87,7 +81,7 @@ defmodule Shep.Orchestrator do
       {:reply, {:error, "task already running or claimed"}, state}
     else
       new_state = Dispatch.dispatch_task(task, state)
-      write_ets(new_state)
+      Snapshot.write(new_state)
       {:reply, :ok, new_state}
     end
   end
@@ -102,7 +96,7 @@ defmodule Shep.Orchestrator do
         Process.exit(pid, :kill)
         running = Map.delete(state.running, task_id)
         state = Dispatch.clean_retry(task_id, %{state | running: running})
-        write_ets(state)
+        Snapshot.write(state)
         Logger.info("Killed task #{task_id} (no retry, worktree preserved)")
         {:reply, :ok, state}
     end
@@ -148,7 +142,7 @@ defmodule Shep.Orchestrator do
         paused = Map.delete(state.paused, task_id)
         state = %{state | paused: paused}
         new_state = Dispatch.dispatch_resume(paused_task, state)
-        write_ets(new_state)
+        Snapshot.write(new_state)
         Logger.info("Resumed task #{task_id}")
         {:reply, :ok, new_state}
     end
@@ -156,9 +150,9 @@ defmodule Shep.Orchestrator do
 
   @impl true
   def handle_info({:tick, token}, %{tick_token: token} = state) do
-    new_state = tick(state)
-    new_state = schedule_tick(new_state)
-    write_ets(new_state)
+    new_state = Poller.tick(state)
+    new_state = Poller.schedule_tick(new_state)
+    Snapshot.write(new_state)
     {:noreply, new_state}
   end
 
@@ -171,7 +165,7 @@ defmodule Shep.Orchestrator do
     case find_by_ref(state.running, ref) do
       {task_id, entry} ->
         new_state = Dispatch.handle_task_exit(task_id, entry, :normal, state)
-        write_ets(new_state)
+        Snapshot.write(new_state)
         {:noreply, new_state}
 
       nil ->
@@ -184,7 +178,7 @@ defmodule Shep.Orchestrator do
     case find_by_ref(state.running, ref) do
       {task_id, entry} ->
         new_state = Dispatch.handle_task_exit(task_id, entry, reason, state)
-        write_ets(new_state)
+        Snapshot.write(new_state)
         {:noreply, new_state}
 
       nil ->
@@ -207,7 +201,7 @@ defmodule Shep.Orchestrator do
 
   @impl true
   def handle_info({:idle_check, task_id}, state) do
-    check_idle(task_id, state)
+    Poller.check_idle(task_id, state)
     {:noreply, state}
   end
 
@@ -215,7 +209,7 @@ defmodule Shep.Orchestrator do
   def handle_info({:total_timeout, task_id}, state) do
     if Map.has_key?(state.running, task_id) do
       Logger.warning("Task #{task_id} exceeded total timeout, killing")
-      kill_task(task_id, state)
+      Poller.kill_task(task_id, state)
     end
 
     {:noreply, state}
@@ -254,140 +248,10 @@ defmodule Shep.Orchestrator do
     {:noreply, state}
   end
 
-  defp tick(state) do
-    Logger.debug("Orchestrator tick: polling tracker")
-
-    case Shep.Tracker.fetch_candidates() do
-      {:ok, tasks} ->
-        config = Shep.Config.current!()
-        repo = get_in(config, ["tracker", "repo"])
-
-        Enum.reduce(tasks, state, fn task, acc ->
-          already_known =
-            Map.has_key?(acc.running, task.id) ||
-              MapSet.member?(acc.claimed, task.id) ||
-              Map.has_key?(acc.retry_attempts, task.id)
-
-          deps_clear = deps_resolved?(repo, task)
-
-          if already_known || !deps_clear do
-            acc
-          else
-            Dispatch.dispatch_task(task, acc)
-          end
-        end)
-
-      {:error, reason} ->
-        Logger.warning("Tracker poll failed: #{inspect(reason)}")
-        state
-    end
-  rescue
-    e ->
-      Logger.error("Tick error: #{Exception.message(e)}")
-      state
-  end
-
-  defp deps_resolved?(_repo, %{depends_on: nil}), do: true
-  defp deps_resolved?(_repo, %{depends_on: []}), do: true
-
-  defp deps_resolved?(repo, %{depends_on: deps}) do
-    Shep.Tracker.GitHub.deps_resolved?(repo, deps)
-  end
-
-  defp check_idle(task_id, state) do
-    case Map.get(state.running, task_id) do
-      %{last_output_at: last} when is_integer(last) ->
-        idle_ms = System.monotonic_time(:millisecond) - last
-        config = Shep.Config.current!()
-        idle_timeout = get_in(config, ["agent", "idle_timeout_ms"]) || 600_000
-
-        if idle_ms > idle_timeout do
-          Logger.warning("Task #{task_id} stalled (idle #{idle_ms}ms), killing")
-          Shep.Notifier.notify_stall(task_id, idle_ms)
-          kill_task(task_id, state)
-        end
-
-      _ ->
-        :ok
-    end
-  end
-
-  defp kill_task(task_id, state) do
-    case Map.get(state.running, task_id) do
-      %{pid: pid} -> Process.exit(pid, :kill)
-      nil -> :ok
-    end
-  end
-
   defp find_by_ref(running, ref) do
     Enum.find_value(running, fn
       {task_id, %{ref: ^ref} = entry} -> {task_id, entry}
       _ -> nil
     end)
-  end
-
-  defp schedule_tick(state) do
-    if state.tick_timer, do: Process.cancel_timer(state.tick_timer)
-    token = make_ref()
-
-    config =
-      try do
-        Shep.Config.current!()
-      rescue
-        _ -> %{}
-      end
-
-    interval = get_in(config, ["polling", "interval_ms"]) || 30_000
-    timer = Process.send_after(self(), {:tick, token}, interval)
-    %{state | tick_timer: timer, tick_token: token}
-  end
-
-  defp write_ets(state) do
-    data = %{
-      running:
-        Map.new(state.running, fn {id, entry} ->
-          {id,
-           %{
-             task_type: entry.task.type,
-             started_at: entry.started_at,
-             last_output_at: entry.last_output_at,
-             worktree_path: Map.get(entry, :worktree_path),
-             session_name: Map.get(entry, :session_name)
-           }}
-        end),
-      paused:
-        Map.new(state.paused, fn {id, pt} ->
-          {id,
-           %{
-             task_type: pt.task.type,
-             worktree_path: pt.worktree_path,
-             session_name: pt.session_name,
-             paused_at: pt.paused_at
-           }}
-        end),
-      claimed: MapSet.to_list(state.claimed)
-    }
-
-    :ets.insert(@ets_table, {:state, data})
-  end
-
-  defp reconcile_worktrees do
-    config =
-      try do
-        Shep.Config.current!()
-      rescue
-        _ -> nil
-      end
-
-    if config do
-      root = get_in(config, ["workspace", "root"])
-
-      repo = get_in(config, ["workspace", "repo"]) || "."
-
-      if root && File.dir?(root) do
-        Shep.Worktree.prune(repo)
-        Logger.info("Reconciled worktrees in #{root}")
-      end
-    end
   end
 end
