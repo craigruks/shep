@@ -1,7 +1,48 @@
 defmodule Shep.OrchestratorTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: false
 
   alias Shep.Orchestrator
+
+  defmodule HangingTracker do
+    @moduledoc """
+    Tracker whose `claim/1` never returns. Dispatched agent tasks block
+    at the network boundary, so they deterministically stay in `running`
+    until the test kills them — and never reach gh, git, or an agent CLI.
+    """
+    @behaviour Shep.Tracker
+
+    @impl true
+    def fetch_candidates, do: {:ok, []}
+
+    @impl true
+    def claim(_task_id), do: Process.sleep(:infinity)
+
+    @impl true
+    def update_status(_task_id, _status), do: :ok
+
+    @impl true
+    def add_comment(_task_id, _body), do: :ok
+  end
+
+  setup do
+    Application.put_env(:shep, :tracker_adapter, HangingTracker)
+    on_exit(fn -> Application.delete_env(:shep, :tracker_adapter) end)
+    :ok
+  end
+
+  # Submits a task that hangs in HangingTracker.claim/1 and registers
+  # cleanup, so no test leaks a running task (and a concurrency slot)
+  # into its siblings.
+  defp submit_hanging_task(prefix) do
+    task = %Shep.Task{
+      id: "#{prefix}-#{System.unique_integer([:positive])}",
+      branch: "test/#{prefix}",
+      prompt: "echo hello"
+    }
+
+    on_exit(fn -> Orchestrator.kill(task.id) end)
+    {Orchestrator.submit(task), task}
+  end
 
   describe "snapshot/0" do
     test "returns state from ETS when orchestrator is running" do
@@ -13,14 +54,11 @@ defmodule Shep.OrchestratorTest do
   end
 
   describe "submit/1" do
-    test "accepts a valid task" do
-      task = %Shep.Task{
-        id: "test-submit-#{System.unique_integer([:positive])}",
-        branch: "test/submit",
-        prompt: "echo hello"
-      }
+    test "accepts a valid task and starts running it" do
+      {result, task} = submit_hanging_task("test-submit")
 
-      assert :ok = Orchestrator.submit(task)
+      assert :ok = result
+      assert Map.has_key?(Orchestrator.snapshot().running, task.id)
     end
   end
 
@@ -30,13 +68,11 @@ defmodule Shep.OrchestratorTest do
     end
 
     test "kills a running task without scheduling a retry" do
-      task = %Shep.Task{
-        id: "test-kill-#{System.unique_integer([:positive])}",
-        branch: "test/kill",
-        prompt: "echo hello"
-      }
+      {:ok, task} = submit_hanging_task("test-kill")
 
-      :ok = Orchestrator.submit(task)
+      assert Map.has_key?(Orchestrator.snapshot().running, task.id),
+             "task must be dispatched, not queued: another test leaked a running task"
+
       assert :ok = Orchestrator.kill(task.id)
       refute Map.has_key?(Orchestrator.snapshot().running, task.id)
       assert {:error, "task not running"} = Orchestrator.kill(task.id)
