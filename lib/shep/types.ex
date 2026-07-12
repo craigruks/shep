@@ -78,7 +78,8 @@ defmodule Shep.Task do
     agent: :claude,
     base_branch: "staging",
     prompt_args: %{},
-    no_merge: false
+    no_merge: false,
+    demo: false
   ]
 
   @type agent :: :claude | :codex
@@ -92,7 +93,8 @@ defmodule Shep.Task do
           type: String.t() | nil,
           depends_on: [String.t()] | nil,
           agent: agent(),
-          no_merge: boolean()
+          no_merge: boolean(),
+          demo: boolean()
         }
 end
 
