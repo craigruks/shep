@@ -1,9 +1,8 @@
-defmodule Shep.AgentRunnerCILoopTest do
+defmodule Shep.GoalCILoopTest do
   # Installs global adapters (:ci_watch_adapter, :tracker_adapter),
   # so this module must not run concurrently with other cases.
   use ExUnit.Case, async: false
 
-  alias Shep.AgentRunner
   alias Shep.CIWatchStub
   alias Shep.Completion.{Complete, Failed}
   alias Shep.Tracker.Memory
@@ -20,6 +19,14 @@ defmodule Shep.AgentRunnerCILoopTest do
     end)
 
     :ok
+  end
+
+  # Drives Goal.ci_loop with the real fix-turn capability injected,
+  # exactly the wiring AgentRunner.run/3 performs in production.
+  defp ci(final, pr_url, task, wt, config) do
+    opid = self()
+    run_turn = fn prompt -> Shep.AgentRunner.fix_turn(prompt, wt, task, config, opid) end
+    Shep.Goal.ci_loop(final, pr_url, task, wt, config, opid, run_turn)
   end
 
   defp tmp_dir(prefix) do
@@ -73,13 +80,12 @@ defmodule Shep.AgentRunnerCILoopTest do
     task = %Shep.Task{id: "ci-1", branch: "shep/ci-1", prompt: "p"}
 
     assert ^final =
-             AgentRunner.run_ci_loop_for_test(
+             ci(
                final,
                @pr_url,
                task,
                dir,
-               config("unused", 2),
-               self()
+               config("unused", 2)
              )
 
     assert "in-review" == Memory.get_status("ci-1")
@@ -96,7 +102,7 @@ defmodule Shep.AgentRunnerCILoopTest do
     task = %Shep.Task{id: "ci-2", branch: "shep/ci-2", prompt: "p"}
 
     assert ^final =
-             AgentRunner.run_ci_loop_for_test(final, @pr_url, task, wt, config(agent, 2), self())
+             ci(final, @pr_url, task, wt, config(agent, 2))
 
     assert File.exists?(Path.join(wt, "ci_fix.marker"))
     assert File.read!(Path.join(wt, "fix_args.txt")) =~ "quality gate exploded"
@@ -113,7 +119,7 @@ defmodule Shep.AgentRunnerCILoopTest do
     task = %Shep.Task{id: "ci-3", branch: "shep/ci-3", prompt: "p"}
 
     assert %Failed{reason: reason, recoverable: false} =
-             AgentRunner.run_ci_loop_for_test(final, @pr_url, task, wt, config(agent, 1), self())
+             ci(final, @pr_url, task, wt, config(agent, 1))
 
     assert reason =~ "CI failed after 1 fix attempts"
     assert reason =~ "Quality"
@@ -129,7 +135,7 @@ defmodule Shep.AgentRunnerCILoopTest do
     task = %Shep.Task{id: "ci-4", branch: "shep/ci-4", prompt: "p", agent: :codex}
 
     assert %Failed{reason: reason, recoverable: false} =
-             AgentRunner.run_ci_loop_for_test(final, @pr_url, task, dir, config(agent, 2), self())
+             ci(final, @pr_url, task, dir, config(agent, 2))
 
     assert reason =~ "CI failed after 0 fix attempts"
     refute File.exists?(Path.join(dir, "ci_fix.marker"))
@@ -145,7 +151,7 @@ defmodule Shep.AgentRunnerCILoopTest do
     task = %Shep.Task{id: "ci-5", branch: "shep/ci-5", prompt: "p"}
 
     assert %Failed{reason: reason, recoverable: false} =
-             AgentRunner.run_ci_loop_for_test(final, @pr_url, task, dir, config(agent, 2), self())
+             ci(final, @pr_url, task, dir, config(agent, 2))
 
     assert reason =~ "push failed during CI fix"
     assert "failed" == Memory.get_status("ci-5")
@@ -159,13 +165,12 @@ defmodule Shep.AgentRunnerCILoopTest do
     task = %Shep.Task{id: "ci-6", branch: "shep/ci-6", prompt: "p", no_merge: true}
 
     assert ^final =
-             AgentRunner.run_ci_loop_for_test(
+             ci(
                final,
                @pr_url,
                task,
                dir,
-               config("unused", 2),
-               self()
+               config("unused", 2)
              )
 
     assert nil == Memory.get_status("ci-6")
