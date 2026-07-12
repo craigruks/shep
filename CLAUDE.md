@@ -75,6 +75,11 @@ just shep help            #           full command table
 the shepherd steps onto the field, works the session interactively,
 then sends Shep back out.
 
+Control commands reach a running daemon over distributed Erlang (node
+`shep@<host>`, started by `just shep up`). With no daemon they fall back
+to a local one-shot node. `just shep demo` runs the whole loop with a
+stub agent and a memory tracker; nothing is pushed.
+
 ## Agent Selection
 
 `shep:codex` label on GitHub issue → Codex CLI instead of Claude.

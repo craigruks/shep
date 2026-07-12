@@ -140,10 +140,41 @@ defmodule Shep.AgentRunner do
   end
 
   defp run_single_turn_with_args(agent_cmd, args, cwd, task, orchestrator_pid) do
+    case resolve_executable(agent_cmd) do
+      nil -> executable_not_found(agent_cmd)
+      exe -> run_port(exe, args, cwd, task, orchestrator_pid)
+    end
+  end
+
+  @doc "Resolve an agent command: bare names via PATH, paths relative to cwd."
+  @spec resolve_executable(String.t()) :: String.t() | nil
+  def resolve_executable(cmd) do
+    if String.contains?(cmd, "/") do
+      path = Path.expand(cmd)
+      if File.exists?(path), do: path, else: nil
+    else
+      System.find_executable(cmd)
+    end
+  end
+
+  defp executable_not_found(agent_cmd) do
+    reason = "agent command not found: #{agent_cmd}"
+    Logger.error(reason)
+
+    %Shep.IterationResult{
+      stdout: "",
+      stderr: reason,
+      exit_code: 127,
+      completion: %Shep.Completion.Failed{reason: reason, recoverable: false},
+      duration_ms: 0
+    }
+  end
+
+  defp run_port(exe, args, cwd, task, orchestrator_pid) do
     started_at = System.monotonic_time(:millisecond)
 
     port =
-      Port.open({:spawn_executable, System.find_executable(agent_cmd)}, [
+      Port.open({:spawn_executable, exe}, [
         :binary,
         :exit_status,
         {:line, @max_line_length},
@@ -259,6 +290,11 @@ defmodule Shep.AgentRunner do
     end
   end
 
+  defp maybe_create_pr(_completion, %{demo: true} = task, _path, _config) do
+    Logger.info("Demo task #{task.id}: skipping push and PR creation")
+    nil
+  end
+
   defp maybe_create_pr(%Shep.Completion.Complete{summary: summary}, task, worktree_path, config) do
     if Shep.Worktree.has_uncommitted_changes?(worktree_path) do
       Logger.warning("Worktree has uncommitted changes, skipping PR")
@@ -269,6 +305,11 @@ defmodule Shep.AgentRunner do
   end
 
   defp maybe_create_pr(_completion, _task, _path, _config), do: nil
+
+  @doc false
+  def maybe_create_pr_for_test(completion, task, path, config) do
+    maybe_create_pr(completion, task, path, config)
+  end
 
   defp push_and_pr(task, summary, config, cwd) do
     repo = get_in(config, ["tracker", "repo"])

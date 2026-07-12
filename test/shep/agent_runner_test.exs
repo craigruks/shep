@@ -117,3 +117,18 @@ defmodule Shep.AgentRunnerTest do
     end
   end
 end
+
+defmodule Shep.AgentRunnerDemoTest do
+  use ExUnit.Case, async: true
+
+  alias Shep.AgentRunner
+
+  describe "demo tasks" do
+    test "never push or create a PR, even on a clean Complete" do
+      task = %Shep.Task{id: "demo-t", branch: "shep/demo-t", prompt: "x", demo: true}
+      completion = %Shep.Completion.Complete{summary: "done"}
+
+      assert nil == AgentRunner.maybe_create_pr_for_test(completion, task, "/nonexistent", %{})
+    end
+  end
+end

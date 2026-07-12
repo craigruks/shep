@@ -7,9 +7,7 @@ defmodule Mix.Tasks.Shep.Status do
   @impl true
   def run(_args) do
     Application.put_env(:logger, :level, :none)
-    Mix.Task.run("app.start")
-
-    snapshot = Shep.Orchestrator.snapshot()
+    {_source, snapshot} = Shep.Control.call(Shep.Orchestrator, :snapshot, [])
 
     running =
       Map.new(snapshot[:running] || %{}, fn {id, info} ->

@@ -8,9 +8,10 @@ defmodule Mix.Tasks.Shep.Resume do
   def run(args) do
     case parse_args(args) do
       {:ok, task_id} ->
-        Mix.Task.run("app.start")
+        {source, result} = Shep.Control.call(Shep.Orchestrator, :resume, [task_id])
+        if source == :local, do: Mix.shell().info("(no daemon found; acting on local node)")
 
-        case Shep.Orchestrator.resume(task_id) do
+        case result do
           :ok ->
             Mix.shell().info("Task #{task_id} resumed.")
 
