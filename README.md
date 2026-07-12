@@ -107,8 +107,13 @@ One `Task.Supervisor` child per issue. Each agent gets:
    substitution.
 4. **A leash.** Idle watchdog, hard timeout, max turns. Line-buffered stdout
    streams back for liveness.
-5. **A finish line.** The agent signals `<completion>`, Shep pushes the
-   branch, opens the PR, and babysits CI so you don't have to.
+5. **A goal.** Not "the agent finished" but "a PR with green CI." After
+   the agent signals `<completion>`, Shep runs your `goal.verify` command
+   in the worktree; failures go back to the same session for a fix turn
+   before any PR exists. Once the PR is up, red CI sends the failing
+   check logs back to the session, the fix gets pushed, CI re-runs.
+   Attempts are capped; exhaustion means `shep:failed`, a preserved
+   worktree, and a Slack ping, never a silent shrug.
 
 Supervision tree (the whole thing):
 
@@ -166,6 +171,7 @@ concurrency, timeouts, or the tracker while Shep is running. No restarts.
 tracker:   { kind: "github", repo: "you/your-repo" }
 workspace: { root: ~/code/shep_worktrees }
 agent:     { command: "claude", max_concurrent: 3, max_turns: 10 }
+goal:      { verify: "mix quality", verify_fixes: 2, ci_fixes: 2 }
 hooks:     { on_worktree_ready: "pnpm install --frozen-lockfile" }
 staging:   { base_branch: "staging", pr_target: "staging" }
 ```

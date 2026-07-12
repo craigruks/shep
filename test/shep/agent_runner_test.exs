@@ -128,7 +128,7 @@ defmodule Shep.AgentRunnerDemoTest do
       task = %Shep.Task{id: "demo-t", branch: "shep/demo-t", prompt: "x", demo: true}
       completion = %Shep.Completion.Complete{summary: "done"}
 
-      assert nil == AgentRunner.maybe_create_pr_for_test(completion, task, "/nonexistent", %{})
+      assert :none == AgentRunner.create_pr_for_test(completion, task, "/nonexistent", %{})
     end
   end
 end

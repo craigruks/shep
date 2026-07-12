@@ -37,9 +37,26 @@ defmodule Shep.AgentRunner do
           end
 
         final = resolve_completion(iterations)
-        pr_url = maybe_create_pr(final, task, worktree_path, config)
-        maybe_watch_ci(pr_url, task, config)
-        cleanup_worktree(worktree_path, final)
+        final = run_verify_loop(final, task, worktree_path, config, orchestrator_pid)
+
+        {final, pr_url} =
+          case create_pr(final, task, worktree_path, config) do
+            {:ok, url} ->
+              {run_ci_loop(final, url, task, worktree_path, config, orchestrator_pid), url}
+
+            :none ->
+              {final, nil}
+
+            {:error, reason} ->
+              Logger.error("Push or PR creation failed for task #{task.id}: #{reason}")
+
+              {%Shep.Completion.Failed{
+                 reason: "push/PR failed: #{Shep.Goal.tail(reason, 300)}",
+                 recoverable: false
+               }, nil}
+          end
+
+        cleanup_worktree(worktree_path, final, config)
         duration = System.monotonic_time(:millisecond) - started_at
 
         result = %Shep.RunResult{
@@ -82,9 +99,10 @@ defmodule Shep.AgentRunner do
 
   defp resolve_worktree(task, _opts, config) do
     root = get_in(config, ["workspace", "root"])
+    repo = get_in(config, ["workspace", "repo"]) || "."
     File.mkdir_p!(root)
 
-    case Shep.Worktree.create(task.branch, task.base_branch, root) do
+    case Shep.Worktree.create(task.branch, task.base_branch, root, repo) do
       {:ok, path} -> {:ok, path, false}
       {:error, reason} -> {:error, reason}
     end
@@ -267,57 +285,146 @@ defmodule Shep.AgentRunner do
     end
   end
 
-  defp maybe_watch_ci(nil, _task, _config), do: :ok
+  # ── Goal: verify loop (pre-PR, cheapest failures first) ──
 
-  defp maybe_watch_ci(_pr_url, %{no_merge: true} = task, _config) do
-    Logger.info("Skipping CI watch for task #{task.id} (no-merge)")
-    :ok
-  end
+  defp run_verify_loop(
+         %Shep.Completion.Complete{} = final,
+         %{demo: false, agent: :claude} = task,
+         worktree_path,
+         config,
+         orchestrator_pid
+       ) do
+    case get_in(config, ["goal", "verify"]) do
+      nil ->
+        final
 
-  defp maybe_watch_ci(pr_url, task, config) do
-    repo = get_in(config, ["tracker", "repo"])
-    pr_number = pr_url |> String.split("/") |> List.last()
-
-    case Shep.CIWatch.watch(repo, pr_number) do
-      :passed ->
-        Logger.info("CI passed for task #{task.id}")
-        Shep.Tracker.update_status(task.id, "in-review")
-
-      {:failed, reason} ->
-        Logger.error("CI failed for task #{task.id}: #{reason}")
-        Shep.Tracker.update_status(task.id, "failed")
-        Shep.Tracker.add_comment(task.id, "CI failed after retries: #{reason}")
-        Shep.Notifier.notify_failure(task, reason)
+      verify_cmd ->
+        max = get_in(config, ["goal", "verify_fixes"]) || 2
+        do_verify(final, task, worktree_path, config, orchestrator_pid, verify_cmd, 0, max)
     end
   end
 
-  defp maybe_create_pr(_completion, %{demo: true} = task, _path, _config) do
-    Logger.info("Demo task #{task.id}: skipping push and PR creation")
-    nil
+  defp run_verify_loop(final, _task, _path, _config, _pid), do: final
+
+  defp do_verify(final, task, wt, config, opid, verify_cmd, attempt, max) do
+    send(opid, {:agent_output, task.id, "[goal] running verify (attempt #{attempt + 1})"})
+
+    case Shep.Goal.run_verify(verify_cmd, wt) do
+      {:ok, _out} ->
+        Logger.info("Verify passed for task #{task.id}")
+        final
+
+      {:error, out} when attempt < max ->
+        Logger.warning("Verify failed for task #{task.id}, fix turn #{attempt + 1}/#{max}")
+        prompt = Shep.Goal.fix_prompt(:verify, attempt + 1, max, out, verify_cmd)
+        iteration = run_fix_turn(prompt, wt, task, config, opid)
+
+        case iteration.completion do
+          %Shep.Completion.Failed{} = failed ->
+            failed
+
+          _ ->
+            do_verify(final, task, wt, config, opid, verify_cmd, attempt + 1, max)
+        end
+
+      {:error, out} ->
+        %Shep.Completion.Failed{
+          reason: "verify failed after #{max} fix attempts: #{Shep.Goal.tail(out, 400)}",
+          recoverable: false
+        }
+    end
   end
 
-  defp maybe_create_pr(%Shep.Completion.Complete{summary: summary}, task, worktree_path, config) do
+  # ── Goal: CI fix loop (post-PR) ──
+
+  defp run_ci_loop(final, _pr_url, %{no_merge: true} = task, _wt, _config, _pid) do
+    Logger.info("Skipping CI watch for task #{task.id} (no-merge)")
+    final
+  end
+
+  defp run_ci_loop(final, pr_url, task, wt, config, opid) do
+    repo = get_in(config, ["tracker", "repo"])
+    pr_number = pr_url |> String.split("/") |> List.last()
+    max = get_in(config, ["goal", "ci_fixes"]) || 2
+    do_ci(final, repo, pr_number, task, wt, config, opid, 0, max)
+  end
+
+  defp do_ci(final, repo, pr, task, wt, config, opid, attempt, max) do
+    case Shep.CIWatch.watch(repo, pr, max_retries: 1) do
+      :passed ->
+        Logger.info("CI passed for task #{task.id}")
+        Shep.Tracker.update_status(task.id, "in-review")
+        final
+
+      {:failed, reason} when attempt < max and task.agent == :claude ->
+        Logger.warning("CI failed for task #{task.id}, fix turn #{attempt + 1}/#{max}: #{reason}")
+        logs = Shep.CIWatch.failure_logs(repo, pr)
+        prompt = Shep.Goal.fix_prompt(:ci, attempt + 1, max, logs, nil)
+        _iteration = run_fix_turn(prompt, wt, task, config, opid)
+
+        case push_branch(task, wt) do
+          :ok ->
+            do_ci(final, repo, pr, task, wt, config, opid, attempt + 1, max)
+
+          {:error, push_err} ->
+            give_up(task, "push failed during CI fix: #{Shep.Goal.tail(push_err, 300)}")
+        end
+
+      {:failed, reason} ->
+        give_up(task, "CI failed after #{attempt} fix attempts: #{reason}")
+    end
+  end
+
+  defp give_up(task, reason) do
+    Logger.error("Goal not reached for task #{task.id}: #{reason}")
+    Shep.Tracker.update_status(task.id, "failed")
+    Shep.Tracker.add_comment(task.id, "Goal not reached: #{reason}")
+    Shep.Notifier.notify_failure(task, reason)
+    %Shep.Completion.Failed{reason: reason, recoverable: false}
+  end
+
+  defp run_fix_turn(prompt, wt, task, config, opid) do
+    agent_cmd = agent_command(task.agent, config)
+    args = Shep.AgentRunner.Claude.build_continue_args(prompt, task.id)
+    run_single_turn_with_args(agent_cmd, args, wt, task, opid)
+  end
+
+  # ── Push and PR ──
+
+  defp create_pr(_completion, %{demo: true} = task, _path, _config) do
+    Logger.info("Demo task #{task.id}: skipping push and PR creation")
+    :none
+  end
+
+  defp create_pr(%Shep.Completion.Complete{summary: summary}, task, worktree_path, config) do
     if Shep.Worktree.has_uncommitted_changes?(worktree_path) do
       Logger.warning("Worktree has uncommitted changes, skipping PR")
-      nil
+      :none
     else
       push_and_pr(task, summary, config, worktree_path)
     end
   end
 
-  defp maybe_create_pr(_completion, _task, _path, _config), do: nil
+  defp create_pr(_completion, _task, _path, _config), do: :none
 
   @doc false
-  def maybe_create_pr_for_test(completion, task, path, config) do
-    maybe_create_pr(completion, task, path, config)
+  def create_pr_for_test(completion, task, path, config) do
+    create_pr(completion, task, path, config)
+  end
+
+  defp push_branch(task, cwd) do
+    case System.cmd("git", ["push", "origin", task.branch], cd: cwd, stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {err, _} -> {:error, err}
+    end
   end
 
   defp push_and_pr(task, summary, config, cwd) do
     repo = get_in(config, ["tracker", "repo"])
     target = get_in(config, ["staging", "pr_target"]) || task.base_branch
 
-    case System.cmd("git", ["push", "origin", task.branch], cd: cwd, stderr_to_stdout: true) do
-      {_, 0} ->
+    case push_branch(task, cwd) do
+      :ok ->
         label =
           if task.no_merge,
             do: "shep:no-merge",
@@ -345,26 +452,26 @@ defmodule Shep.AgentRunner do
             url = String.trim(url)
             Logger.info("PR created: #{url}")
             Shep.Tracker.update_status(task.id, "pr-created")
-            url
+            {:ok, url}
 
           {err, _} ->
-            Logger.error("PR creation failed: #{err}")
-            nil
+            {:error, "PR creation failed: #{err}"}
         end
 
-      {err, _} ->
-        Logger.error("Push failed: #{err}")
-        nil
+      {:error, err} ->
+        {:error, "push failed: #{err}"}
     end
   end
 
-  defp cleanup_worktree(path, completion) do
+  defp cleanup_worktree(path, completion, config) do
+    repo = get_in(config, ["workspace", "repo"]) || "."
+
     case completion do
       %Shep.Completion.Failed{} ->
         Logger.info("Preserving worktree for failed task: #{path}")
 
       _ ->
-        Shep.Worktree.remove(path)
+        Shep.Worktree.remove(path, repo)
     end
   end
 end

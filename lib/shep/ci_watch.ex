@@ -93,6 +93,46 @@ defmodule Shep.CIWatch do
 
   defp normalize_check(_), do: :pending
 
+  @doc "Collect failing-check logs for a PR, tail-capped, for a fix turn."
+  @spec failure_logs(String.t(), String.t()) :: String.t()
+  def failure_logs(repo, pr_number) do
+    case gh(["pr", "checks", pr_number, "--repo", repo, "--json", "name,bucket,link"]) do
+      {:ok, json} ->
+        json
+        |> Jason.decode!()
+        |> Enum.filter(&(&1["bucket"] == "fail"))
+        |> Enum.map_join("\n\n", &check_log(repo, &1))
+
+      {:error, _} ->
+        ""
+    end
+  rescue
+    _ -> ""
+  end
+
+  defp check_log(repo, check) do
+    case run_id_from_link(check["link"]) do
+      nil ->
+        "#{check["name"]}: failed (no logs available)"
+
+      run_id ->
+        case gh(["run", "view", run_id, "--repo", repo, "--log-failed"]) do
+          {:ok, log} -> "### #{check["name"]}\n" <> Shep.Goal.tail(log, 6_000)
+          {:error, _} -> "#{check["name"]}: failed (logs unavailable)"
+        end
+    end
+  end
+
+  @doc false
+  def run_id_from_link(link) when is_binary(link) do
+    case Regex.run(~r{/runs/(\d+)}, link) do
+      [_, id] -> id
+      _ -> nil
+    end
+  end
+
+  def run_id_from_link(_), do: nil
+
   defp gh(args) do
     case System.cmd("gh", args, stderr_to_stdout: true) do
       {output, 0} -> {:ok, String.trim(output)}
