@@ -98,3 +98,27 @@ Resume dispatches into existing worktree with `--continue`.
 - Pure-function tests: `async: true` (completion, prompt, buffer)
 - Integration tests: `async: false` (orchestrator, worktree)
 - No mocking framework: behaviours + test adapters
+
+## Operating Shep as an outer agent (the handler)
+
+Shep supervises known failure modes (crash, stall, red CI). A Claude
+session operating Shep owns the unknown ones: auth, config drift, new
+failure classes. Day to day: routine runs need no observer (Slack pings
+on stall/failure); sit resident only for first runs on a new repo or
+after config changes.
+
+Playbook:
+
+- Start: `SHEP_WORKFLOW=<path> just shep up`, then monitor
+  `.shep/orchestrator.log` with a FILTERED tail (verdict lines, not
+  per-poll noise).
+- Push rejected with GH007: the target repo's `user.email` is private.
+  Fix `git -C <workspace.repo> config user.email` to the noreply
+  address. SSH agents do not reach the daemon; use
+  `gh auth setup-git` plus an https `insteadOf` rewrite.
+- Task failed and worktree preserved: diagnose in the worktree, fix the
+  environment, then re-queue by flipping the issue label back to `shep`
+  (remove `shep:in-progress`). cleanup_stale rebuilds the worktree.
+- Prime directive: every intervention ends as a commit. A Shep code
+  fix, a config change, or a line in this playbook. Never fix the same
+  exception twice by hand.

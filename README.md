@@ -26,8 +26,7 @@ You manage the *work*. Shep manages the *agents*.
 
 ## Why
 
-Nobody wants to babysit a coding agent. Watching a terminal scroll is not
-engineering. It's television with extra steps.
+Nobody wants to babysit a coding agent.
 
 The fix is to move up one level: stop supervising *agents* and start managing
 *work*. You triage issues, apply a label, and walk away. Shep polls the
@@ -40,8 +39,9 @@ The whistle is the label. The dog does the running.
 
 ## Lineage
 
-Shep didn't come from nowhere. The story has a false start in it: the first
-design was a TypeScript harness, a port of Matt Pocock's
+Shep comes from a long, distinguished line of shepherd dogs
+(orchestrators). The story has a false start in it: the first design
+was a TypeScript harness, a port of Matt Pocock's
 [**Sandcastle**](https://github.com/mattpocock/sandcastle). Squint
 at the module layout today (agent runner, stream buffer, prompt builder,
 session, hooks) and you can still see Sandcastle's skeleton. The shape
@@ -93,7 +93,7 @@ never met your bugs.
         │ labels move:          │ retry w/ backoff           │
         │ shep:in-progress      │ idle watchdog              │
         │ shep:in-review  ◄─────┴──── CI passed ◄────────────┘
-        │ shep:failed     ◄────────── CI failed (3 retries + Slack)
+        │ shep:failed     ◄────────── CI failed (fix turns + Slack)
 ```
 
 One `Task.Supervisor` child per issue. Each agent gets:
@@ -113,7 +113,7 @@ One `Task.Supervisor` child per issue. Each agent gets:
    before any PR exists. Once the PR is up, red CI sends the failing
    check logs back to the session, the fix gets pushed, CI re-runs.
    Attempts are capped; exhaustion means `shep:failed`, a preserved
-   worktree, and a Slack ping, never a silent shrug.
+   worktree, and a Slack ping.
 
 Supervision tree (the whole thing):
 
@@ -166,6 +166,8 @@ concurrency, timeouts, or the tracker while Shep is running. No restarts.
 > do not reach a nohup'd process. Give it non-interactive push auth once:
 > `gh auth setup-git`, and if your remote uses SSH,
 > `git config url."https://github.com/<you>/".insteadOf "git@github.com:<you>/"`.
+> While you're in there, set the repo's `user.email` to your GitHub noreply
+> address, or GH007 email privacy will reject the daemon's first push.
 
 ```yaml
 tracker:   { kind: "github", repo: "you/your-repo" }
@@ -175,6 +177,22 @@ goal:      { verify: "mix quality", verify_fixes: 2, ci_fixes: 2 }
 hooks:     { on_worktree_ready: "pnpm install --frozen-lockfile" }
 staging:   { base_branch: "staging", pr_target: "staging" }
 ```
+
+## Shepherding another repo
+
+Shep cuts worktrees from `workspace.repo`, which does not have to be the
+checkout Shep sits in. Point it at any local clone (bare repos work),
+keep one config file per flock, and select it at startup:
+
+```yaml
+workspace: { root: ~/code/shep_worktrees, repo: /path/to/that/repo }
+```
+
+```sh
+SHEP_WORKFLOW=.shep/WORKFLOW.thatrepo.md just shep up
+```
+
+One dog, many flocks. The tracked `WORKFLOW.md` stays a placeholder.
 
 ## Commands (speak dog)
 
@@ -219,7 +237,7 @@ labels and logs.
 | `shep:in-progress` | claimed, agent running |
 | `shep:pr-created` | branch pushed, PR open |
 | `shep:in-review` | CI green; a human should look |
-| `shep:failed` | CI red after 3 retries; reason posted as a comment |
+| `shep:failed` | goal not reached after capped fix attempts; reason posted as a comment |
 | `shep:promoted` | shipped |
 | `shep:codex` | route this issue to Codex instead of Claude |
 | `shep:no-merge` | open the PR but skip CI-watch / auto-merge labels |
@@ -227,11 +245,32 @@ labels and logs.
 Dependencies work too: put `Depends on: #12, #45` in an issue body and Shep
 won't dispatch it until those are `shep:in-review` or better.
 
+## The three layers (running Shep with a handler)
+
+At a sheepdog trial, the handler works the dog and the farmer owns the
+flock. Same here, and each layer owns a different failure class:
+
+| layer | role | owns |
+|---|---|---|
+| agents | do the work | wrong code (fix turns) |
+| Shep | mechanical supervision | known failures: crash, stall, red CI |
+| the handler | an agent session operating Shep | unknown failures: auth, config drift, new failure classes |
+| you | intent and merge authority | judgment |
+
+The handler is optional and event-driven, not a vigil. Routine runs need
+no observer; with `SLACK_WEBHOOK_URL` set, Shep's notifier pings you on
+stall or failure. Sit a session down only
+for first runs on a new repo or after config changes. Its prime
+directive: every intervention ends as a commit (a code fix, a config
+change, or a playbook line), so Shep's autonomy grows and the handler
+gets quieter over time. The playbook lives in [`AGENTS.md`](AGENTS.md),
+which is exactly the file an arriving agent reads first.
+
 ## Ethos
 
 - **Error kernel.** The orchestrator never crashes from agent work. Every
   risky thing happens in a supervised Task; the GenServer just collects
-  `:DOWN` messages and decides. Uptime is a design choice, not a hope.
+  `:DOWN` messages and decides.
 - **The tracker is the database.** No Postgres, no Redis, no state file to
   corrupt. GitHub labels *are* the state machine; restart Shep and it
   re-learns the world from the tracker. (ETS holds a read-only snapshot for
@@ -242,7 +281,7 @@ won't dispatch it until those are `shep:in-review` or better.
   3 attempts. Stalled agent → watchdog kill + Slack ping. Failed task → the
   worktree is *preserved* for post-mortem; successes are pruned.
 - **No mocking framework.** Behaviours + test adapters (`Tracker.Memory`).
-  97 tests, `mix quality` = format + credo --strict + test. Files < 300 lines.
+  111 tests, `mix quality` = format + credo --strict + test. Files < 300 lines.
 - **Small enough to read.** ~3k lines of lib. You can read the whole thing
   with your coffee. That's not a limitation; that's the pitch.
 
