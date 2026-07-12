@@ -17,4 +17,10 @@ for line in "${lines[@]}"; do
   sleep 0.4
 done
 
-echo '<completion>{"type": "complete", "summary": "Demo task complete. A real agent would have committed changes here.", "verify": ["orchestrator dispatched into an isolated worktree", "stdout streamed line-buffered", "completion signal parsed"]}</completion>'
+# make a real, minimal change so the branch has a diff worth a PR
+echo "🐑 Grazed by Shep on $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> PASTURE.md
+git add PASTURE.md
+git commit -q -m "chore: let Shep graze in PASTURE.md"
+echo "Committed PASTURE.md."
+
+echo '<completion>{"type": "complete", "summary": "Grazed PASTURE.md and committed the change.", "verify": ["orchestrator dispatched into an isolated worktree", "stdout streamed line-buffered", "a real commit landed on the task branch", "completion signal parsed"]}</completion>'
