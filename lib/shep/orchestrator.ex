@@ -16,8 +16,7 @@ defmodule Shep.Orchestrator do
     running: %{},
     paused: %{},
     claimed: MapSet.new(),
-    retry_attempts: %{},
-    totals: %{input_tokens: 0, output_tokens: 0, duration_ms: 0}
+    retry_attempts: %{}
   ]
 
   @doc "Start the orchestrator."
@@ -54,7 +53,7 @@ defmodule Shep.Orchestrator do
   def snapshot do
     case :ets.lookup(@ets_table, :state) do
       [{:state, data}] -> data
-      [] -> %{running: %{}, totals: %{}}
+      [] -> %{running: %{}}
     end
   end
 
@@ -366,7 +365,6 @@ defmodule Shep.Orchestrator do
              paused_at: pt.paused_at
            }}
         end),
-      totals: state.totals,
       claimed: MapSet.to_list(state.claimed)
     }
 

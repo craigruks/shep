@@ -1,6 +1,6 @@
 defmodule Mix.Tasks.Shep.Status do
   @shortdoc "Output orchestrator state as JSON."
-  @moduledoc "Print running tasks, claimed tasks, and totals as JSON to stdout."
+  @moduledoc "Print running, paused, and claimed tasks as JSON to stdout."
 
   use Mix.Task
 
@@ -44,8 +44,7 @@ defmodule Mix.Tasks.Shep.Status do
       running_count: map_size(running),
       paused: paused,
       paused_count: map_size(paused),
-      claimed: snapshot[:claimed] || [],
-      totals: snapshot[:totals] || %{}
+      claimed: snapshot[:claimed] || []
     }
 
     IO.puts(Jason.encode!(output, pretty: true))

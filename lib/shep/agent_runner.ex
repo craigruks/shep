@@ -31,7 +31,7 @@ defmodule Shep.AgentRunner do
           if resuming? do
             execute_resume_turns(worktree_path, task, orchestrator_pid, max_turns, config)
           else
-            {built_prompt, _timeout} = Shep.PromptBuilder.build(task)
+            built_prompt = Shep.PromptBuilder.build(task)
             prompt = Shep.Prompt.expand(built_prompt, task.prompt_args, worktree_path)
             execute_turns(prompt, worktree_path, task, orchestrator_pid, max_turns, config)
           end
@@ -111,8 +111,10 @@ defmodule Shep.AgentRunner do
   defp execute_resume_turns(worktree_path, task, orchestrator_pid, max_turns, config) do
     agent_cmd = agent_command(task.agent, config)
     args = agent_module(task.agent).build_resume_args(task.id)
+    idle_ms = idle_timeout_ms(config)
 
-    iteration = run_single_turn_with_args(agent_cmd, args, worktree_path, task, orchestrator_pid)
+    iteration =
+      run_single_turn_with_args(agent_cmd, args, worktree_path, task, orchestrator_pid, idle_ms)
 
     case iteration.completion do
       %Shep.Completion.Complete{} ->
@@ -122,7 +124,7 @@ defmodule Shep.AgentRunner do
         [iteration]
 
       _ ->
-        {built_prompt, _timeout} = Shep.PromptBuilder.build(task)
+        built_prompt = Shep.PromptBuilder.build(task)
         prompt = Shep.Prompt.expand(built_prompt, task.prompt_args, worktree_path)
 
         remaining =
@@ -134,35 +136,40 @@ defmodule Shep.AgentRunner do
 
   defp execute_turns(prompt, worktree_path, task, orchestrator_pid, max_turns, config) do
     agent_cmd = agent_command(task.agent, config)
-    do_turns(prompt, worktree_path, task, orchestrator_pid, agent_cmd, max_turns, 1, [])
+    idle_ms = idle_timeout_ms(config)
+    do_turns(prompt, worktree_path, task, orchestrator_pid, agent_cmd, idle_ms, max_turns, 1, [])
   end
 
-  defp do_turns(_prompt, _path, _task, _pid, _cmd, max, turn, acc) when turn > max do
+  defp do_turns(_prompt, _path, _task, _pid, _cmd, _idle_ms, max, turn, acc) when turn > max do
     Enum.reverse(acc)
   end
 
-  defp do_turns(prompt, path, task, orchestrator_pid, cmd, max, turn, acc) do
-    iteration = run_single_turn(cmd, prompt, path, task, orchestrator_pid)
+  defp do_turns(prompt, path, task, orchestrator_pid, cmd, idle_ms, max, turn, acc) do
+    iteration = run_single_turn(cmd, prompt, path, task, orchestrator_pid, idle_ms)
     new_acc = [iteration | acc]
 
     case iteration.completion do
       %Shep.Completion.Complete{} -> Enum.reverse(new_acc)
       %Shep.Completion.Failed{} -> Enum.reverse(new_acc)
       _ when turn >= max -> Enum.reverse(new_acc)
-      _ -> do_turns(prompt, path, task, orchestrator_pid, cmd, max, turn + 1, new_acc)
+      _ -> do_turns(prompt, path, task, orchestrator_pid, cmd, idle_ms, max, turn + 1, new_acc)
     end
   end
 
-  defp run_single_turn(agent_cmd, prompt, cwd, task, orchestrator_pid) do
+  defp run_single_turn(agent_cmd, prompt, cwd, task, orchestrator_pid, idle_ms) do
     args = agent_module(task.agent).build_args(prompt, task.id)
-    run_single_turn_with_args(agent_cmd, args, cwd, task, orchestrator_pid)
+    run_single_turn_with_args(agent_cmd, args, cwd, task, orchestrator_pid, idle_ms)
   end
 
-  defp run_single_turn_with_args(agent_cmd, args, cwd, task, orchestrator_pid) do
+  defp run_single_turn_with_args(agent_cmd, args, cwd, task, orchestrator_pid, idle_ms) do
     case resolve_executable(agent_cmd) do
       nil -> executable_not_found(agent_cmd)
-      exe -> run_port(exe, args, cwd, task, orchestrator_pid)
+      exe -> run_port(exe, args, cwd, task, orchestrator_pid, idle_ms)
     end
+  end
+
+  defp idle_timeout_ms(config) do
+    get_in(config, ["agent", "idle_timeout_ms"]) || 600_000
   end
 
   @doc "Resolve an agent command: bare names via PATH, paths relative to cwd."
@@ -189,7 +196,7 @@ defmodule Shep.AgentRunner do
     }
   end
 
-  defp run_port(exe, args, cwd, task, orchestrator_pid) do
+  defp run_port(exe, args, cwd, task, orchestrator_pid, idle_ms) do
     started_at = System.monotonic_time(:millisecond)
 
     port =
@@ -202,7 +209,7 @@ defmodule Shep.AgentRunner do
         {:args, args}
       ])
 
-    {stdout, exit_code} = collect_port_output(port, task.id, orchestrator_pid)
+    {stdout, exit_code} = collect_port_output(port, task.id, orchestrator_pid, idle_ms)
     duration = System.monotonic_time(:millisecond) - started_at
 
     completion =
@@ -240,33 +247,45 @@ defmodule Shep.AgentRunner do
     get_in(config, ["agent", "command"]) || "claude"
   end
 
-  defp collect_port_output(port, task_id, orchestrator_pid) do
-    collect_port_output(port, task_id, orchestrator_pid, [], nil)
+  @doc false
+  def collect_port_output_for_test(port, task_id, orchestrator_pid, idle_ms) do
+    collect_port_output(port, task_id, orchestrator_pid, idle_ms)
   end
 
-  defp collect_port_output(port, task_id, orchestrator_pid, lines, exit_code) do
+  defp collect_port_output(port, task_id, orchestrator_pid, idle_ms) do
+    collect_port_output(port, task_id, orchestrator_pid, idle_ms, [], nil)
+  end
+
+  defp collect_port_output(port, task_id, orchestrator_pid, idle_ms, lines, exit_code) do
     receive do
       {^port, {:data, {:eol, line}}} ->
         send(orchestrator_pid, {:agent_output, task_id, line})
         :telemetry.execute([:shep, :agent, :stdout], %{}, %{task_id: task_id, line: line})
-        collect_port_output(port, task_id, orchestrator_pid, [line | lines], exit_code)
+        collect_port_output(port, task_id, orchestrator_pid, idle_ms, [line | lines], exit_code)
 
       {^port, {:data, {:noeol, line}}} ->
-        collect_port_output(port, task_id, orchestrator_pid, [line | lines], exit_code)
+        collect_port_output(port, task_id, orchestrator_pid, idle_ms, [line | lines], exit_code)
 
       {^port, {:exit_status, code}} ->
         {lines |> Enum.reverse() |> Enum.join("\n"), code}
     after
-      600_000 ->
+      idle_ms ->
+        os_pid = Port.info(port, :os_pid)
         Port.close(port)
-        kill_port_os_pid(port)
+        kill_port_os_pid(os_pid)
         {lines |> Enum.reverse() |> Enum.join("\n"), 137}
     end
   end
 
-  defp kill_port_os_pid(_port) do
+  # Port.info/2 returns nil once the port is closed, so the pid is
+  # captured before Port.close/1. SIGKILL is best-effort: the process
+  # may already be gone.
+  defp kill_port_os_pid({:os_pid, os_pid}) do
+    System.cmd("kill", ["-9", Integer.to_string(os_pid)], stderr_to_stdout: true)
     :ok
   end
+
+  defp kill_port_os_pid(nil), do: :ok
 
   defp run_hooks(config, worktree_path) do
     Shep.Hooks.run_lifecycle(config, "on_worktree_ready", worktree_path)
@@ -396,7 +415,7 @@ defmodule Shep.AgentRunner do
   defp run_fix_turn(prompt, wt, task, config, opid) do
     agent_cmd = agent_command(task.agent, config)
     args = Shep.AgentRunner.Claude.build_continue_args(prompt, task.id)
-    run_single_turn_with_args(agent_cmd, args, wt, task, opid)
+    run_single_turn_with_args(agent_cmd, args, wt, task, opid, idle_timeout_ms(config))
   end
 
   # ── Push and PR ──

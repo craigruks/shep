@@ -205,7 +205,7 @@ happier. We know which one that is.
 | `just shep down` | `just shep rest` | stop it |
 | `just shep run 42` | `just shep fetch 42` | dispatch an agent on issue 42 |
 | `just shep queue` | `just shep pen` | list templates + queued candidates |
-| `just shep ps` | `just shep flock` | status JSON: running, paused, totals |
+| `just shep ps` | `just shep flock` | status JSON: running, paused, claimed |
 | `just shep pause 42` | `just shep heel 42` | pause (worktree + session preserved) |
 | `just shep resume 42` | `just shep send 42` | resume a paused task |
 | `just shep attach 42` | `just shep take 42` | **you step in** (see below) |

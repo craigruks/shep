@@ -32,7 +32,7 @@ defmodule Shep.Orchestrator.Dispatch do
     else
       case reason do
         :normal ->
-          Logger.info("Task completed: #{task_id}")
+          Logger.info("Task exited: #{task_id}")
           clean_retry(task_id, state)
 
         {:shutdown, _} ->

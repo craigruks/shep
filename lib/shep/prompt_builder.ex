@@ -3,29 +3,16 @@ defmodule Shep.PromptBuilder do
 
   @base_file "base.md"
 
-  @template_timeouts %{
-    "lint-fix" => 1_200_000,
-    "transpiler-fix" => 1_200_000,
-    "test-fix" => 1_200_000,
-    "dependency-update" => 1_200_000,
-    "docs-update" => 600_000,
-    "custom" => 2_700_000
-  }
-
-  @doc "Build a full prompt for a task. Returns `{prompt, suggested_timeout_ms}`."
-  @spec build(Shep.Task.t()) :: {String.t(), non_neg_integer()}
+  @doc "Build a full prompt for a task."
+  @spec build(Shep.Task.t()) :: String.t()
   def build(%Shep.Task{} = task) do
     base = read_template(@base_file)
     template = load_task_template(task.type)
     body = task.prompt || ""
 
-    full =
-      base
-      |> String.replace("{{TASK_BODY}}", template <> "\n\n" <> body)
-      |> inject_args(task.prompt_args)
-
-    timeout = Map.get(@template_timeouts, task.type || "custom", 1_200_000)
-    {full, timeout}
+    base
+    |> String.replace("{{TASK_BODY}}", template <> "\n\n" <> body)
+    |> inject_args(task.prompt_args)
   end
 
   @doc "List available template names."

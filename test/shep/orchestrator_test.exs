@@ -8,7 +8,7 @@ defmodule Shep.OrchestratorTest do
       snapshot = Orchestrator.snapshot()
       assert is_map(snapshot)
       assert Map.has_key?(snapshot, :running)
-      assert Map.has_key?(snapshot, :totals)
+      assert Map.has_key?(snapshot, :claimed)
     end
   end
 
