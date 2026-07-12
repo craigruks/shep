@@ -156,6 +156,12 @@ just shep demo        # or, since this is a sheepdog: just shep trial
 `WORKFLOW.md` is YAML front matter, hot-reloaded every second. Edit
 concurrency, timeouts, or the tracker while Shep is running. No restarts.
 
+> [!NOTE]
+> The daemon pushes branches itself, and SSH agents (1Password, biometric)
+> do not reach a nohup'd process. Give it non-interactive push auth once:
+> `gh auth setup-git`, and if your remote uses SSH,
+> `git config url."https://github.com/<you>/".insteadOf "git@github.com:<you>/"`.
+
 ```yaml
 tracker:   { kind: "github", repo: "you/your-repo" }
 workspace: { root: ~/code/shep_worktrees }
