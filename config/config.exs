@@ -1,6 +1,6 @@
 import Config
 
-config :factory, workflow_path: "WORKFLOW.md"
+config :shep, workflow_path: "WORKFLOW.md"
 
 config :logger, :console,
   format: "$time [$level] $metadata$message\n",

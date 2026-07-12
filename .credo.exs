@@ -17,8 +17,8 @@
           {Credo.Check.Warning.IoInspect, []},
 
           # Custom checks
-          {Factory.Checks.NoAtomFromInput, []},
-          {Factory.Checks.PublicDoc, []}
+          {Shep.Checks.NoAtomFromInput, []},
+          {Shep.Checks.PublicDoc, []}
         ]
       }
     }
