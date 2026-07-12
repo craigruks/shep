@@ -9,7 +9,7 @@
 #   start            -                start orchestrator (interactive iex)
 #   run <issue>      fetch <issue>    dispatch an agent on one issue
 #   queue            pen              list templates + queued candidates
-#   ps               flock            status JSON (running, paused, claimed, totals)
+#   ps               flock            status JSON (running, paused, claimed)
 #   pause <id>       heel <id>        pause task (preserves worktree + session)
 #   resume <id>      send <id>        resume paused task (--continue)
 #   attach <id>      take <id>        shepherd steps in: pause → Claude session → offer resume

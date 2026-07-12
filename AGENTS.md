@@ -59,7 +59,7 @@ just shep up              # wake:    start orchestrator (background, idempotent)
 just shep down            # rest:    stop orchestrator
 just shep run <issue>     # fetch:   dispatch an agent on one issue
 just shep queue           # pen:     list templates + queued candidates
-just shep ps              # flock:   status JSON: running, paused, claimed, totals
+just shep ps              # flock:   status JSON: running, paused, claimed
 just shep pause <id>      # heel:    pause task (preserves worktree + session)
 just shep resume <id>     # send:    resume paused task (--continue)
 just shep attach <id>     # take:    shepherd steps in: pause → Claude → offer resume

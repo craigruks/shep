@@ -31,7 +31,7 @@ defmodule Shep.AgentRunner do
           if resuming? do
             execute_resume_turns(worktree_path, task, orchestrator_pid, max_turns, config)
           else
-            {built_prompt, _timeout} = Shep.PromptBuilder.build(task)
+            built_prompt = Shep.PromptBuilder.build(task)
             prompt = Shep.Prompt.expand(built_prompt, task.prompt_args, worktree_path)
             execute_turns(prompt, worktree_path, task, orchestrator_pid, max_turns, config)
           end
@@ -122,7 +122,7 @@ defmodule Shep.AgentRunner do
         [iteration]
 
       _ ->
-        {built_prompt, _timeout} = Shep.PromptBuilder.build(task)
+        built_prompt = Shep.PromptBuilder.build(task)
         prompt = Shep.Prompt.expand(built_prompt, task.prompt_args, worktree_path)
 
         remaining =
