@@ -16,41 +16,56 @@ defmodule Shep.CIWatch.GitHub do
   @impl true
   def watch(repo, pr_number, opts \\ []) do
     max_retries = Keyword.get(opts, :max_retries, @max_ci_retries)
-    do_watch(repo, pr_number, 0, max_retries, nil, 0)
+    do_watch(repo, pr_number, 0, max_retries, nil)
   end
 
-  defp do_watch(_repo, _pr, attempt, max, last_failure, _poll_errors) when attempt >= max do
+  defp do_watch(_repo, _pr, attempt, max, last_failure) when attempt >= max do
     Logger.error("CI retries exhausted (#{max} attempts)")
     {:failed, last_failure || "ci-loop-exhausted"}
   end
 
-  defp do_watch(repo, pr_number, attempt, max, _last_failure, poll_errors) do
+  defp do_watch(repo, pr_number, attempt, max, _last_failure) do
     Logger.info("Watching CI for PR ##{pr_number} (attempt #{attempt + 1}/#{max})")
 
-    case poll_checks(repo, pr_number) do
+    case poll_until_settled(repo, pr_number, 0) do
       :passed ->
         Logger.info("CI passed for PR ##{pr_number}")
         :passed
 
       {:failed, reason} ->
         Logger.warning("CI failed for PR ##{pr_number}: #{reason}")
-        do_watch(repo, pr_number, attempt + 1, max, reason, 0)
+        do_watch(repo, pr_number, attempt + 1, max, reason)
+
+      {:poll_errors_exhausted, reason} ->
+        {:failed, "poll-error: #{reason}"}
+    end
+  end
+
+  # One attempt: re-poll through :pending (and transient poll errors)
+  # without re-logging the attempt banner.
+  defp poll_until_settled(repo, pr_number, poll_errors) do
+    case poll_checks(repo, pr_number) do
+      :passed ->
+        :passed
+
+      {:failed, reason} ->
+        {:failed, reason}
 
       {:error, reason} ->
         new_errors = poll_errors + 1
 
         if new_errors >= @max_poll_errors do
           Logger.error("CI poll errors exhausted (#{new_errors} consecutive failures)")
-          {:failed, "poll-error: #{reason}"}
+          {:poll_errors_exhausted, reason}
         else
           Logger.warning("CI poll error #{new_errors}/#{@max_poll_errors}: #{reason}")
           Process.sleep(@poll_interval_ms)
-          do_watch(repo, pr_number, attempt, max, nil, new_errors)
+          poll_until_settled(repo, pr_number, new_errors)
         end
 
       :pending ->
         Process.sleep(@poll_interval_ms)
-        do_watch(repo, pr_number, attempt, max, nil, 0)
+        poll_until_settled(repo, pr_number, 0)
     end
   end
 
