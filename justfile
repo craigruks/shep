@@ -3,6 +3,7 @@
 #
 #   canonical        herding alias    action
 #   ---------        -------------    ------
+#   demo             trial            full loop with a stub agent, zero setup
 #   up               wake             start orchestrator (background, idempotent)
 #   down             rest             stop orchestrator
 #   start            -                start orchestrator (interactive iex)
@@ -42,6 +43,7 @@ shep cmd id="":
     drop)  CMD=kill ;;
     home)  CMD=promote ;;
     bark)  CMD=speak ;;
+    trial) CMD=demo ;;
     *)     CMD="{{cmd}}" ;;
   esac
 
@@ -58,7 +60,7 @@ shep cmd id="":
         fi
         rm -f .shep/orchestrator.pid
       fi
-      nohup elixir -S mix run --no-halt > .shep/orchestrator.log 2>&1 &
+      nohup elixir --sname shep -S mix run --no-halt > .shep/orchestrator.log 2>&1 &
       echo $! > .shep/orchestrator.pid
       echo "Shep is awake (pid $!)"
       echo "  just shep view     watch the field"
@@ -124,7 +126,11 @@ shep cmd id="":
       ;;
     session)
       need_id
-      DIR="$HOME/.claude/projects/-Users-craigruks-code-shep-worktrees-shep-{{id}}"
+      # derive the Claude projects dir from WORKFLOW.md workspace.root
+      ROOT=$(sed -n 's/^ *root: *//p' WORKFLOW.md | head -1)
+      ROOT="${ROOT/#\~/$HOME}"
+      ENC=$(printf '%s' "$ROOT/shep_{{id}}" | sed 's/[/_.]/-/g')
+      DIR="$HOME/.claude/projects/$ENC"
       echo "Waiting for agent session..."
       until ls "$DIR"/*.jsonl 2>/dev/null | head -1 | grep -q .; do sleep 1; done
       LATEST=$(ls -t "$DIR"/*.jsonl | head -1)
@@ -187,6 +193,9 @@ shep cmd id="":
     quality)
       mix quality
       ;;
+    demo)
+      mix shep.demo
+      ;;
     speak)
       echo "ᵂᴼᴼᶠ  ∪･ｪ･∪"
       if command -v say >/dev/null 2>&1; then
@@ -218,6 +227,7 @@ shep cmd id="":
       echo "Usage: just shep <command> [id]"
       echo ""
       echo "  canonical        herding alias    action"
+      echo "  demo             trial            full loop with a stub agent, zero setup"
       echo "  up               wake             start orchestrator (background)"
       echo "  down             rest             stop orchestrator"
       echo "  start            -                start orchestrator (interactive iex)"

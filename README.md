@@ -145,6 +145,12 @@ just shep up          # or: just shep wake
 just shep view        # tmux: orchestrator + a pane per task, auto-spawning
 ```
 
+No repo handy? See the whole loop with a stub agent, zero setup:
+
+```sh
+just shep demo        # or, since this is a sheepdog: just shep trial
+```
+
 `WORKFLOW.md` is YAML front matter, hot-reloaded every second. Edit
 concurrency, timeouts, or the tracker while Shep is running. No restarts.
 
@@ -164,6 +170,7 @@ happier. We know which one that is.
 
 | canonical | herding | what happens |
 |---|---|---|
+| `just shep demo` | `just shep trial` | full loop with a stub agent, zero setup |
 | `just shep up` | `just shep wake` | start the orchestrator (background) |
 | `just shep down` | `just shep rest` | stop it |
 | `just shep run 42` | `just shep fetch 42` | dispatch an agent on issue 42 |
