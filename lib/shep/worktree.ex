@@ -3,15 +3,17 @@ defmodule Shep.Worktree do
 
   require Logger
 
-  @doc "Create a worktree for the given branch, branching from base_branch."
-  @spec create(String.t(), String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  def create(branch, base_branch, root) when is_binary(branch) and is_binary(base_branch) do
+  @doc "Create a worktree for the given branch, branching from base_branch. `repo` is the git repo to cut from."
+  @spec create(String.t(), String.t(), String.t(), String.t()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def create(branch, base_branch, root, repo \\ ".")
+      when is_binary(branch) and is_binary(base_branch) do
     safe_name = sanitize_branch(branch)
-    path = Path.join(root, safe_name)
+    path = Path.expand(Path.join(root, safe_name))
 
-    cleanup_stale(branch, path)
+    cleanup_stale(branch, path, repo)
 
-    case System.cmd("git", ["worktree", "add", "-b", branch, path, base_branch],
+    case System.cmd("git", ["-C", repo, "worktree", "add", "-b", branch, path, base_branch],
            stderr_to_stdout: true
          ) do
       {_output, 0} ->
@@ -23,28 +25,28 @@ defmodule Shep.Worktree do
     end
   end
 
-  defp cleanup_stale(branch, path) do
+  defp cleanup_stale(branch, path, repo) do
     if File.dir?(path) do
       Logger.info("Removing stale worktree: #{path}")
-      System.cmd("git", ["worktree", "remove", path, "--force"], stderr_to_stdout: true)
+      System.cmd("git", ["-C", repo, "worktree", "remove", path, "--force"], stderr_to_stdout: true)
     end
 
-    case System.cmd("git", ["branch", "-D", branch], stderr_to_stdout: true) do
+    case System.cmd("git", ["-C", repo, "branch", "-D", branch], stderr_to_stdout: true) do
       {_, 0} -> Logger.info("Removed stale branch: #{branch}")
       _ -> :ok
     end
 
-    prune()
+    prune(repo)
   end
 
   @doc "Remove a worktree. Preserves if there are uncommitted changes."
-  @spec remove(String.t()) :: :ok | {:error, String.t()}
-  def remove(path) when is_binary(path) do
+  @spec remove(String.t(), String.t()) :: :ok | {:error, String.t()}
+  def remove(path, repo \\ ".") when is_binary(path) do
     if has_uncommitted_changes?(path) do
       Logger.warning("Preserving dirty worktree: #{path}")
       {:error, "worktree has uncommitted changes"}
     else
-      case System.cmd("git", ["worktree", "remove", path], stderr_to_stdout: true) do
+      case System.cmd("git", ["-C", repo, "worktree", "remove", path], stderr_to_stdout: true) do
         {_output, 0} ->
           Logger.info("Removed worktree: #{path}")
           :ok
@@ -65,9 +67,9 @@ defmodule Shep.Worktree do
   end
 
   @doc "Prune stale worktree references."
-  @spec prune() :: :ok
-  def prune do
-    System.cmd("git", ["worktree", "prune"], stderr_to_stdout: true)
+  @spec prune(String.t()) :: :ok
+  def prune(repo \\ ".") do
+    System.cmd("git", ["-C", repo, "worktree", "prune"], stderr_to_stdout: true)
     :ok
   end
 

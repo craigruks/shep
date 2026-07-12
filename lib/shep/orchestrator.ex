@@ -384,8 +384,10 @@ defmodule Shep.Orchestrator do
     if config do
       root = get_in(config, ["workspace", "root"])
 
+      repo = get_in(config, ["workspace", "repo"]) || "."
+
       if root && File.dir?(root) do
-        Shep.Worktree.prune()
+        Shep.Worktree.prune(repo)
         Logger.info("Reconciled worktrees in #{root}")
       end
     end

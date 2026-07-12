@@ -3,7 +3,12 @@ defmodule Shep.Config.Schema do
 
   @defaults %{
     "polling" => %{"interval_ms" => 30_000},
-    "workspace" => %{"root" => "~/code/shep_worktrees"},
+    "workspace" => %{"root" => "~/code/shep_worktrees", "repo" => "."},
+    "goal" => %{
+      "verify" => nil,
+      "verify_fixes" => 2,
+      "ci_fixes" => 2
+    },
     "agent" => %{
       "command" => "claude",
       "max_concurrent" => 3,
@@ -65,6 +70,15 @@ defmodule Shep.Config.Schema do
         nil -> Path.join(System.user_home!(), "code/shep_worktrees")
       end
 
+    expanded_repo =
+      case get_in(config, ["workspace", "repo"]) do
+        "~/" <> rest -> Path.join(System.user_home!(), rest)
+        "~" -> System.user_home!()
+        path when is_binary(path) -> path
+        nil -> "."
+      end
+
+    config = put_in(config, ["workspace", "repo"], expanded_repo)
     {:ok, put_in(config, ["workspace", "root"], expanded)}
   end
 end

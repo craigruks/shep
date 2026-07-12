@@ -32,6 +32,12 @@ defmodule Shep.AgentRunner.Claude do
     ]
   end
 
+  @doc "Build CLI args for a fix turn: continue the session with a new prompt."
+  @spec build_continue_args(String.t(), String.t()) :: [String.t()]
+  def build_continue_args(prompt, task_id) when is_binary(prompt) and is_binary(task_id) do
+    build_resume_args(task_id) ++ ["-p", prompt]
+  end
+
   @doc "Extract text content from a Claude Code stream-json line."
   @spec extract_text(String.t()) :: String.t()
   def extract_text(line) when is_binary(line) do
