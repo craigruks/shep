@@ -113,7 +113,7 @@ One `Task.Supervisor` child per issue. Each agent gets:
    before any PR exists. Once the PR is up, red CI sends the failing
    check logs back to the session, the fix gets pushed, CI re-runs.
    Attempts are capped; exhaustion means `shep:failed`, a preserved
-   worktree, and a Slack ping, never a silent shrug.
+   worktree, and a Slack ping.
 
 Supervision tree (the whole thing):
 
@@ -270,7 +270,7 @@ which is exactly the file an arriving agent reads first.
 
 - **Error kernel.** The orchestrator never crashes from agent work. Every
   risky thing happens in a supervised Task; the GenServer just collects
-  `:DOWN` messages and decides. Uptime is a design choice, not a hope.
+  `:DOWN` messages and decides.
 - **The tracker is the database.** No Postgres, no Redis, no state file to
   corrupt. GitHub labels *are* the state machine; restart Shep and it
   re-learns the world from the tracker. (ETS holds a read-only snapshot for
