@@ -195,10 +195,5 @@ defmodule Shep.Tracker.GitHub do
     remove_label(repo, issue_id, @label_queued)
   end
 
-  defp gh(args) when is_list(args) do
-    case System.cmd("gh", args, stderr_to_stdout: true) do
-      {output, 0} -> {:ok, String.trim(output)}
-      {output, _} -> {:error, String.trim(output)}
-    end
-  end
+  defp gh(args) when is_list(args), do: Shep.GH.run(args)
 end

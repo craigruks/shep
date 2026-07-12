@@ -388,6 +388,11 @@ defmodule Shep.AgentRunner do
     %Shep.Completion.Failed{reason: reason, recoverable: false}
   end
 
+  @doc false
+  def run_ci_loop_for_test(final, pr_url, task, wt, config, opid) do
+    run_ci_loop(final, pr_url, task, wt, config, opid)
+  end
+
   defp run_fix_turn(prompt, wt, task, config, opid) do
     agent_cmd = agent_command(task.agent, config)
     args = Shep.AgentRunner.Claude.build_continue_args(prompt, task.id)

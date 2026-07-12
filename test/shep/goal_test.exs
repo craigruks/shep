@@ -67,15 +67,15 @@ defmodule Shep.GoalTest do
     end
   end
 
-  describe "CIWatch.run_id_from_link/1" do
+  describe "CIWatch.GitHub.run_id_from_link/1" do
     test "extracts run id from a checks link" do
       link = "https://github.com/o/r/actions/runs/1234567/job/89"
-      assert Shep.CIWatch.run_id_from_link(link) == "1234567"
+      assert Shep.CIWatch.GitHub.run_id_from_link(link) == "1234567"
     end
 
     test "nil-safe on garbage" do
-      assert Shep.CIWatch.run_id_from_link("https://example.com") == nil
-      assert Shep.CIWatch.run_id_from_link(nil) == nil
+      assert Shep.CIWatch.GitHub.run_id_from_link("https://example.com") == nil
+      assert Shep.CIWatch.GitHub.run_id_from_link(nil) == nil
     end
   end
 end
