@@ -12,6 +12,8 @@ entirely.
 
 You manage the *work*. Shep manages the *agents*.
 
+![just shep demo: a task dispatched into an isolated worktree, agent output streamed, completion parsed](assets/demo.gif)
+
 > [!TIP]
 > **Just want it running?** → [Quickstart](#quickstart) ·
 > **Want the philosophy?** → [Why](#why) ·

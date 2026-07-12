@@ -91,6 +91,7 @@ defmodule Shep.Orchestrator.Dispatch do
   end
 
   defp do_dispatch(task, config, state) do
+    Logger.info("Dispatching task #{task.id} (#{task.type || "custom"}, agent: #{task.agent})")
     claimed = MapSet.put(state.claimed, task.id)
     state = %{state | claimed: claimed}
 

@@ -17,6 +17,7 @@ defmodule Shep.AgentRunner do
 
     case resolve_worktree(task, opts, config) do
       {:ok, worktree_path, resuming?} ->
+        Logger.info("Worktree ready for task #{task.id}: #{worktree_path}")
         session = agent_module(task.agent).session_name(task.id)
 
         send(
