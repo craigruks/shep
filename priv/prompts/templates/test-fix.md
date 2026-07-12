@@ -9,4 +9,4 @@ The output enables: green CI without masking real failures.
 Run `pnpm exec vitest run` and ensure all tests pass before committing.
 
 ## Scope
-Fix the failing tests. If the test is correct and the implementation is wrong, fix the implementation — but only the minimal change needed.
+Fix the failing tests. If the test is correct and the implementation is wrong, fix the implementation, but only the minimal change needed.

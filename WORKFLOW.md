@@ -1,13 +1,13 @@
 ---
 tracker:
   kind: "github"
-  repo: "LayerKick/layerkick"
+  repo: "your-org/your-repo"
 
 polling:
   interval_ms: 30000
 
 workspace:
-  root: ~/code/factory_worktrees
+  root: ~/code/shep_worktrees
 
 agent:
   command: "claude"
@@ -25,6 +25,6 @@ staging:
   pr_target: "staging"
 ---
 
-# Dark Factory Workflow
+# Shep Workflow
 
 Agent orchestration config. YAML front matter is hot-reloaded every 1s.

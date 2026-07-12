@@ -1,15 +1,24 @@
-defmodule Factory.MixProject do
+defmodule Shep.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :factory,
+      app: :shep,
       version: "0.1.0",
       elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
+      description: "Autonomous agent orchestration. You're the shepherd, Shep works the flock.",
+      package: package(),
       deps: deps(),
       aliases: aliases(),
       dialyzer: [plt_add_apps: [:mix, :credo]]
+    ]
+  end
+
+  defp package do
+    [
+      licenses: ["MIT"],
+      links: %{"GitHub" => "https://github.com/craigruks/shep"}
     ]
   end
 
@@ -20,7 +29,7 @@ defmodule Factory.MixProject do
   def application do
     [
       extra_applications: [:logger],
-      mod: {Factory.Application, []}
+      mod: {Shep.Application, []}
     ]
   end
 
