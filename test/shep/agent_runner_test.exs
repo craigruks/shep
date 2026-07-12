@@ -118,6 +118,52 @@ defmodule Shep.AgentRunnerTest do
   end
 end
 
+defmodule Shep.AgentRunnerPortKillTest do
+  use ExUnit.Case, async: true
+
+  alias Shep.AgentRunner
+
+  defp sleeper_script do
+    dir = Path.join(System.tmp_dir!(), "shep_kill_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    path = Path.join(dir, "sleeper.sh")
+    File.write!(path, "#!/bin/sh\nexec sleep 30\n")
+    File.chmod!(path, 0o755)
+    path
+  end
+
+  test "silence timeout closes the port and SIGKILLs the OS process" do
+    script = sleeper_script()
+
+    port =
+      Port.open({:spawn_executable, script}, [
+        :binary,
+        :exit_status,
+        {:line, 65_536},
+        :stderr_to_stdout
+      ])
+
+    {:os_pid, os_pid} = Port.info(port, :os_pid)
+
+    assert {_output, 137} = AgentRunner.collect_port_output_for_test(port, "kill-1", self(), 50)
+    assert wait_until_dead(os_pid), "OS process #{os_pid} survived the timeout kill"
+  end
+
+  # kill -0 succeeds on a zombie until the VM reaps it, so poll briefly.
+  defp wait_until_dead(os_pid, tries \\ 100) do
+    case System.cmd("kill", ["-0", Integer.to_string(os_pid)], stderr_to_stdout: true) do
+      {_, 0} when tries > 0 ->
+        Process.sleep(20)
+        wait_until_dead(os_pid, tries - 1)
+
+      {_, exit_code} ->
+        exit_code != 0
+    end
+  end
+end
+
 defmodule Shep.AgentRunnerDemoTest do
   use ExUnit.Case, async: true
 
