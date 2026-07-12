@@ -66,8 +66,6 @@ One deliberate deviation: the standard advice was "adopt Linear, run a
 daemon." Shep skipped both. GitHub issues and labels are the *entire* state
 machine, no new tools. No regrets so far.
 
-The long version, with the receipts:
-[**The factory runs dark**](https://www.layerkick.com/blog/dark-factory/).
 
 ### Why Elixir?
 
@@ -134,7 +132,7 @@ and `jq` for you) and at least one agent CLI on PATH:
 haven't.
 
 ```sh
-git clone git@github.com:craigruks/shep.git && cd shep
+git clone https://github.com/craigruks/shep.git && cd shep
 mise install          # erlang, elixir, just, gh, jq (mise.toml)
 mix deps.get
 
@@ -295,6 +293,13 @@ which is exactly the file an arriving agent reads first.
 - **Not magic.** An agent that can't fix your flaky test still can't fix
   your flaky test. Shep just finds out without you watching.
 - **Not distributed.** One orchestrator, one machine, N agents.
+- **Not a sandbox.** Agents run headless with permission prompts
+  disabled, inside worktrees of your repo, with your credentials. Shep
+  bounds *supervision* (timeouts, retries, kills), not *capability*.
+  Run it on repos and machines you trust it with, and put real
+  isolation (containers, separate accounts) around it if the stakes
+  demand that. LayerKick runs it against an account that physically
+  cannot reach production.
 
 ## License
 
