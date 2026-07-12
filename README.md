@@ -26,8 +26,7 @@ You manage the *work*. Shep manages the *agents*.
 
 ## Why
 
-Nobody wants to babysit a coding agent. Watching a terminal scroll is not
-engineering. It's television with extra steps.
+Nobody wants to babysit a coding agent.
 
 The fix is to move up one level: stop supervising *agents* and start managing
 *work*. You triage issues, apply a label, and walk away. Shep polls the
@@ -38,26 +37,11 @@ not a frozen terminal.
 
 The whistle is the label. The dog does the running.
 
-## The first production run
-
-Shep's first task after leaving home was deleting its own predecessor:
-the in-repo orchestrator it was extracted from, still sitting in the
-monorepo that raised it. Issue labeled `shep`, agent dispatched into an
-isolated worktree, 74 files and 4,526 lines removed, PR opened, CI
-watched to green. Label to PR: 7.5 minutes. Label to green CI: about
-eleven.
-
-The goal loop earned its keep on attempt one. The agent said done, but
-the verify command came back red in the worktree, so Shep sent the
-failure output back to the same session for a fix turn. No red commit
-ever reached CI. That monorepo is private, so no link, but the receipts
-are the point: this repo is not a mockup of an orchestrator, and its
-first PR retired its ancestor.
-
 ## Lineage
 
-Shep didn't come from nowhere. The story has a false start in it: the first
-design was a TypeScript harness, a port of Matt Pocock's
+Shep comes from a long, distinguished line of shepherd dogs
+(orchestrators). The story has a false start in it: the first design
+was a TypeScript harness, a port of Matt Pocock's
 [**Sandcastle**](https://github.com/mattpocock/sandcastle). Squint
 at the module layout today (agent runner, stream buffer, prompt builder,
 session, hooks) and you can still see Sandcastle's skeleton. The shape
@@ -274,7 +258,8 @@ flock. Same here, and each layer owns a different failure class:
 | you | intent and merge authority | judgment |
 
 The handler is optional and event-driven, not a vigil. Routine runs need
-no observer; Slack pings you on stall or failure. Sit a session down only
+no observer; with `SLACK_WEBHOOK_URL` set, Shep's notifier pings you on
+stall or failure. Sit a session down only
 for first runs on a new repo or after config changes. Its prime
 directive: every intervention ends as a commit (a code fix, a config
 change, or a playbook line), so Shep's autonomy grows and the handler
