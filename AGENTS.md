@@ -92,12 +92,32 @@ Orchestrator tracks `paused: %{id => PausedTask}`. Pause kills
 the agent process but preserves worktree + Claude session name.
 Resume dispatches into existing worktree with `--continue`.
 
-## Test Policy
+## Test Policy (two levels)
 
-- Mirrored structure: `lib/shep/*.ex` → `test/shep/*_test.exs`
-- Pure-function tests: `async: true` (completion, prompt, buffer)
-- Integration tests: `async: false` (orchestrator, worktree)
-- No mocking framework: behaviours + test adapters
+Level 1, granularity: every source file with behavior has a mirrored
+test file (`lib/shep/x.ex` → `test/shep/x_test.exs`), the Elixir
+stand-in for colocated tests. Module tests live in their own mirror,
+not in a neighbor file. Exempt classes: mix task wrappers (thin shells
+over tested modules), `application.ex` (OTP boilerplate), `types.ex`
+(bare structs), `shep.ex` (moduledoc), and the dev-only credo checks.
+
+Level 2, confidence (after Kent C. Dodds' [Testing Trophy](https://kentcdodds.com/blog/the-testing-trophy-and-testing-classifications)):
+write tests, not too many, mostly integration. Static analysis is the
+base of the trophy (format, credo --strict, dialyzer). Pure functions get direct units. Side-effecting
+code is tested through real collaborators: real git repos and bare
+remotes, shell scripts as stand-in agents, with test adapters only at
+the network boundary (gh, CI verdicts, tracker). No mocking framework,
+ever; behaviours plus adapters (`Tracker.Memory`, `CIWatchStub`,
+`:gh_runner`).
+
+Deliberate deviations, documented rather than hidden: private loops
+are exposed via `*_for_test` wrappers because the front door (run/3)
+drags Ports, worktrees, and PRs along; the automated suite stops at
+integration, and the e2e tier is `just shep demo` plus live dogfood
+runs.
+
+Mechanics: pure-function tests are `async: true`; anything installing
+an app-env adapter is `async: false` and cleans up in `on_exit`.
 
 ## Operating Shep as an outer agent (the handler)
 

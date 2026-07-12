@@ -9,9 +9,18 @@ defmodule Shep.Tracker do
   @callback update_status(task_id :: String.t(), status()) :: :ok | {:error, term()}
   @callback add_comment(task_id :: String.t(), body :: String.t()) :: :ok | {:error, term()}
 
-  @doc "Get the configured tracker module."
+  @doc """
+  Get the configured tracker module.
+
+  The `:tracker_adapter` app env overrides the config-derived adapter
+  so tests can inject one without rewriting WORKFLOW.md.
+  """
   @spec adapter() :: module()
   def adapter do
+    Application.get_env(:shep, :tracker_adapter) || configured_adapter()
+  end
+
+  defp configured_adapter do
     config = Shep.Config.current!()
 
     case get_in(config, ["tracker", "kind"]) do

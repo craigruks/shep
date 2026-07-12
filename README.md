@@ -280,8 +280,11 @@ which is exactly the file an arriving agent reads first.
 - **Failure is expected, so it's cheap.** Crashed agent → exponential backoff,
   3 attempts. Stalled agent → watchdog kill + Slack ping. Failed task → the
   worktree is *preserved* for post-mortem; successes are pruned.
-- **No mocking framework.** Behaviours + test adapters (`Tracker.Memory`).
-  111 tests, `mix quality` = format + credo --strict + test. Files < 300 lines.
+- **Tests after Kent C. Dodds' [Testing Trophy](https://kentcdodds.com/blog/the-testing-trophy-and-testing-classifications), mirrored per file.** Not too many, mostly
+  integration: real git repos, shell scripts as stand-in agents, adapters
+  only at the network boundary. No mocking framework; behaviours plus
+  test adapters. Every source file with behavior has its mirrored test
+  file. 166 tests, `mix quality` = format + credo --strict + test.
 - **Small enough to read.** ~3k lines of lib. You can read the whole thing
   with your coffee. That's not a limitation; that's the pitch.
 

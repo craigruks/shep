@@ -6,6 +6,7 @@ defmodule Shep.MixProject do
       app: :shep,
       version: "0.1.0",
       elixir: "~> 1.19",
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       description: "Autonomous agent orchestration. You're the shepherd, Shep works the flock.",
       package: package(),
@@ -14,6 +15,9 @@ defmodule Shep.MixProject do
       dialyzer: [plt_add_apps: [:mix, :credo]]
     ]
   end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_env), do: ["lib"]
 
   defp package do
     [

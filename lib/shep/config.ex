@@ -32,7 +32,8 @@ defmodule Shep.Config do
 
   def start_link(opts) do
     path = Keyword.get(opts, :path, Application.get_env(:shep, :workflow_path, "WORKFLOW.md"))
-    GenServer.start_link(__MODULE__, %{path: path}, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, %{path: path}, name: name)
   end
 
   @impl true

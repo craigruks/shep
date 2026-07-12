@@ -41,41 +41,4 @@ defmodule Shep.GoalTest do
       assert p =~ "Do NOT push"
     end
   end
-
-  describe "config schema goal defaults" do
-    test "goal and workspace.repo defaults are present" do
-      {:ok, config} = Shep.Config.Schema.validate(%{})
-      assert get_in(config, ["goal", "verify"]) == nil
-      assert get_in(config, ["goal", "verify_fixes"]) == 2
-      assert get_in(config, ["goal", "ci_fixes"]) == 2
-      assert get_in(config, ["workspace", "repo"]) == "."
-    end
-
-    test "workspace.repo expands tilde" do
-      {:ok, config} = Shep.Config.Schema.validate(%{"workspace" => %{"repo" => "~/code/x"}})
-      assert get_in(config, ["workspace", "repo"]) == Path.join(System.user_home!(), "code/x")
-    end
-  end
-
-  describe "Claude fix-turn args" do
-    test "build_continue_args continues the session with the prompt" do
-      args = Shep.AgentRunner.Claude.build_continue_args("fix it", "42")
-      assert "--continue" in args
-      assert "shep-42" in args
-      assert List.last(args) == "fix it"
-      assert Enum.at(args, -2) == "-p"
-    end
-  end
-
-  describe "CIWatch.run_id_from_link/1" do
-    test "extracts run id from a checks link" do
-      link = "https://github.com/o/r/actions/runs/1234567/job/89"
-      assert Shep.CIWatch.run_id_from_link(link) == "1234567"
-    end
-
-    test "nil-safe on garbage" do
-      assert Shep.CIWatch.run_id_from_link("https://example.com") == nil
-      assert Shep.CIWatch.run_id_from_link(nil) == nil
-    end
-  end
 end

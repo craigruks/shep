@@ -335,6 +335,11 @@ defmodule Shep.AgentRunner do
     end
   end
 
+  @doc false
+  def run_verify_loop_for_test(final, task, wt, config, opid) do
+    run_verify_loop(final, task, wt, config, opid)
+  end
+
   # ── Goal: CI fix loop (post-PR) ──
 
   defp run_ci_loop(final, _pr_url, %{no_merge: true} = task, _wt, _config, _pid) do
@@ -381,6 +386,11 @@ defmodule Shep.AgentRunner do
     Shep.Tracker.add_comment(task.id, "Goal not reached: #{reason}")
     Shep.Notifier.notify_failure(task, reason)
     %Shep.Completion.Failed{reason: reason, recoverable: false}
+  end
+
+  @doc false
+  def run_ci_loop_for_test(final, pr_url, task, wt, config, opid) do
+    run_ci_loop(final, pr_url, task, wt, config, opid)
   end
 
   defp run_fix_turn(prompt, wt, task, config, opid) do
