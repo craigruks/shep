@@ -18,6 +18,12 @@ defmodule Shep.AgentRunner do
     case resolve_worktree(task, opts, config) do
       {:ok, worktree_path, resuming?} ->
         Logger.info("Worktree ready for task #{task.id}: #{worktree_path}")
+
+        Logger.info(
+          "agent phase: streaming to .shep/runs/#{task.id}.stdout.log; " <>
+            "this log stays quiet except gap heartbeats until verify"
+        )
+
         session = Exec.agent_module(task.agent).session_name(task.id)
 
         send(

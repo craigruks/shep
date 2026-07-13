@@ -92,7 +92,8 @@ defmodule Shep.Orchestrator do
       nil ->
         {:reply, {:error, "task not running"}, state}
 
-      %{pid: pid} ->
+      %{pid: pid} = entry ->
+        Poller.cancel_watchdog(entry)
         Process.exit(pid, :kill)
         running = Map.delete(state.running, task_id)
         state = Dispatch.clean_retry(task_id, %{state | running: running})
@@ -119,6 +120,7 @@ defmodule Shep.Orchestrator do
         paused = Map.put(state.paused, task_id, paused_task)
         state = %{state | paused: paused}
 
+        Poller.cancel_watchdog(entry)
         Process.exit(entry.pid, :shutdown)
 
         Logger.info("Paused task #{task_id}")
@@ -200,9 +202,10 @@ defmodule Shep.Orchestrator do
   end
 
   @impl true
-  def handle_info({:idle_check, task_id}, state) do
-    Poller.check_idle(task_id, state)
-    {:noreply, state}
+  def handle_info({:watchdog, task_id, token}, state) do
+    new_state = Poller.watchdog_tick(task_id, token, state)
+    Snapshot.write(new_state)
+    {:noreply, new_state}
   end
 
   @impl true
@@ -234,7 +237,11 @@ defmodule Shep.Orchestrator do
         {:noreply, state}
 
       entry ->
-        updated = %{entry | last_output_at: System.monotonic_time(:millisecond)}
+        updated =
+          entry
+          |> Map.put(:last_output_at, System.monotonic_time(:millisecond))
+          |> Map.put(:last_heartbeat_at, nil)
+
         {:noreply, %{state | running: Map.put(state.running, task_id, updated)}}
     end
   end
