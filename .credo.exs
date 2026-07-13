@@ -4,7 +4,7 @@
       name: "default",
       strict: true,
       files: %{
-        included: ["lib/", "test/"],
+        included: ["lib/", "test/", "dev/"],
         excluded: [~r/deps/]
       },
       checks: %{

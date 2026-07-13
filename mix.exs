@@ -12,11 +12,32 @@ defmodule Shep.MixProject do
       package: package(),
       deps: deps(),
       aliases: aliases(),
-      dialyzer: [plt_add_apps: [:mix, :credo]]
+      dialyzer: [plt_add_apps: [:mix, :credo]],
+      releases: releases()
     ]
   end
 
-  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  # The built release IS the shipped artifact: `bin/shep` owns the daemon
+  # lifecycle and the tarball bundles ERTS, so it runs with no Elixir
+  # installed. Version flows from `version:` above, so `bin/shep version`
+  # reports 0.3.0 with no second source of truth. Node identity + cookie
+  # (so `mix shep.*` control commands :rpc into a release-run daemon) live
+  # in rel/env.sh.eex.
+  defp releases do
+    [
+      shep: [
+        include_executables_for: [:unix],
+        applications: [shep: :permanent]
+      ]
+    ]
+  end
+
+  # `dev/` holds dev-only tooling (custom credo checks) that depends on
+  # :credo, which is not a prod dependency — so it must stay out of the
+  # prod release compile path, otherwise `MIX_ENV=prod mix release` fails
+  # to compile it.
+  defp elixirc_paths(:test), do: ["lib", "test/support", "dev"]
+  defp elixirc_paths(:dev), do: ["lib", "dev"]
   defp elixirc_paths(_env), do: ["lib"]
 
   defp package do
