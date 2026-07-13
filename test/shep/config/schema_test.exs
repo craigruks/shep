@@ -18,6 +18,12 @@ defmodule Shep.Config.SchemaTest do
       assert get_in(config, ["agent", "command"]) == "claude"
       assert get_in(config, ["agent", "model"]) == "opus"
     end
+
+    test "watchdog cadence defaults are present" do
+      {:ok, config} = Schema.validate(%{})
+      assert get_in(config, ["agent", "watchdog_interval_ms"]) == 15_000
+      assert get_in(config, ["agent", "heartbeat_quiet_ms"]) == 30_000
+    end
   end
 
   describe "path expansion" do

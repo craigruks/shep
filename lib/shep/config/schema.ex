@@ -15,7 +15,9 @@ defmodule Shep.Config.Schema do
       "max_concurrent" => 3,
       "max_turns" => 10,
       "idle_timeout_ms" => 600_000,
-      "total_timeout_ms" => 1_200_000
+      "total_timeout_ms" => 1_200_000,
+      "watchdog_interval_ms" => 15_000,
+      "heartbeat_quiet_ms" => 30_000
     },
     "hooks" => %{
       "on_worktree_ready" => nil,

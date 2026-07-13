@@ -134,7 +134,12 @@ Playbook:
 
 - Start: `SHEP_WORKFLOW=<path> just shep up`, then monitor
   `.shep/orchestrator.log` with a FILTERED tail (verdict lines, not
-  per-poll noise).
+  per-poll noise). That one tail now covers both milestones and
+  liveness: each dispatch logs the phase contract, and a quiet agent
+  emits gap-triggered "task N alive: agent quiet …" heartbeats every
+  ~30s. A separate external stall detector on the runs log is no longer
+  required — silence of BOTH milestones and heartbeats is the alarm,
+  and the recurring watchdog has already killed a truly-dead task.
 - Push rejected with GH007: the target repo's `user.email` is private.
   Fix `git -C <workspace.repo> config user.email` to the noreply
   address. SSH agents do not reach the daemon; use

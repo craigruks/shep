@@ -3,6 +3,8 @@ defmodule Shep.Orchestrator.Dispatch do
 
   require Logger
 
+  alias Shep.Orchestrator.Poller
+
   @base_retry_delay_ms 10_000
   @max_retry_delay_ms 300_000
 
@@ -23,6 +25,7 @@ defmodule Shep.Orchestrator.Dispatch do
   @doc "Handle a completed/crashed task, triggering retry if needed."
   @spec handle_task_exit(String.t(), map(), term(), struct()) :: struct()
   def handle_task_exit(task_id, entry, reason, state) do
+    Poller.cancel_watchdog(entry)
     running = Map.delete(state.running, task_id)
     state = %{state | running: running}
 
@@ -60,10 +63,7 @@ defmodule Shep.Orchestrator.Dispatch do
         })
       end)
 
-    idle_timeout = get_in(config, ["agent", "idle_timeout_ms"]) || 600_000
     total_timeout = get_in(config, ["agent", "total_timeout_ms"]) || 1_200_000
-
-    Process.send_after(self(), {:idle_check, task.id}, idle_timeout)
     Process.send_after(self(), {:total_timeout, task.id}, total_timeout)
 
     entry = %{
@@ -76,7 +76,7 @@ defmodule Shep.Orchestrator.Dispatch do
       last_output_at: System.monotonic_time(:millisecond)
     }
 
-    %{state | running: Map.put(state.running, task.id, entry)}
+    Poller.arm_watchdog(task.id, %{state | running: Map.put(state.running, task.id, entry)})
   end
 
   @doc "Clean up retry state for a task."
@@ -101,10 +101,7 @@ defmodule Shep.Orchestrator.Dispatch do
         Shep.AgentRunner.run(task, self(), %{config: config})
       end)
 
-    idle_timeout = get_in(config, ["agent", "idle_timeout_ms"]) || 600_000
     total_timeout = get_in(config, ["agent", "total_timeout_ms"]) || 1_200_000
-
-    Process.send_after(self(), {:idle_check, task.id}, idle_timeout)
     Process.send_after(self(), {:total_timeout, task.id}, total_timeout)
 
     :telemetry.execute(
@@ -123,7 +120,7 @@ defmodule Shep.Orchestrator.Dispatch do
 
     running = Map.put(state.running, task.id, entry)
     claimed = MapSet.delete(state.claimed, task.id)
-    %{state | running: running, claimed: claimed}
+    Poller.arm_watchdog(task.id, %{state | running: running, claimed: claimed})
   end
 
   defp maybe_retry(task_id, task, state) do
