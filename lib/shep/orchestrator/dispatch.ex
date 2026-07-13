@@ -54,10 +54,11 @@ defmodule Shep.Orchestrator.Dispatch do
   def dispatch_resume(%Shep.PausedTask{} = paused_task, state) do
     config = Shep.Config.current!()
     task = paused_task.task
+    orchestrator = self()
 
     %{pid: pid, ref: ref} =
       Task.Supervisor.async_nolink(Shep.TaskSupervisor, fn ->
-        Shep.AgentRunner.run(task, self(), %{
+        Shep.AgentRunner.run(task, orchestrator, %{
           config: config,
           resume_worktree: paused_task.worktree_path
         })
@@ -94,11 +95,12 @@ defmodule Shep.Orchestrator.Dispatch do
     Logger.info("Dispatching task #{task.id} (#{task.type || "custom"}, agent: #{task.agent})")
     claimed = MapSet.put(state.claimed, task.id)
     state = %{state | claimed: claimed}
+    orchestrator = self()
 
     %{pid: pid, ref: ref} =
       Task.Supervisor.async_nolink(Shep.TaskSupervisor, fn ->
         Shep.Tracker.claim(task.id)
-        Shep.AgentRunner.run(task, self(), %{config: config})
+        Shep.AgentRunner.run(task, orchestrator, %{config: config})
       end)
 
     total_timeout = get_in(config, ["agent", "total_timeout_ms"]) || 1_200_000
