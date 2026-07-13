@@ -55,8 +55,11 @@ One dispatcher recipe: `just shep <command> [id]`. Every canonical
 command has a herding alias. Both hit the same handler.
 
 ```bash
-just shep up              # wake:    start orchestrator (background, idempotent)
-just shep down            # rest:    stop orchestrator
+just shep build           #          build the mix release → bin/shep (run once, and after code changes)
+just shep up              # wake:    start daemon via bin/shep (background, idempotent)
+just shep down            # rest:    stop daemon gracefully (bin/shep stop)
+just shep restart         #          restart daemon in place (bin/shep restart)
+just shep console         # whistle: live IEx into the running flock (bin/shep remote)
 just shep run <issue>     # fetch:   dispatch an agent on one issue
 just shep queue           # pen:     list templates + queued candidates
 just shep ps              # flock:   status JSON: running, paused, claimed
@@ -74,6 +77,15 @@ just shep help            #           full command table
 `attach`/`take` is the human-takeover surface (formerly "foreman"):
 the shepherd steps onto the field, works the session interactively,
 then sends Shep back out.
+
+The daemon is a `mix release`: `just shep build` produces `bin/shep`, and
+the lifecycle recipes drive it (`bin/shep start|stop|restart|pid|remote`).
+`up` backgrounds `bin/shep start` (logs still land in
+`.shep/orchestrator.log`); `down` is a graceful `bin/shep stop`
+(`:init.stop` drains the supervision tree — no more `kill -9` orphaning
+agent Ports or leaving worktree locks). The same tarball ships ERTS, so it
+runs with no Elixir installed; a `v*` tag push publishes per-platform
+tarballs to the GitHub release (`.github/workflows/release.yml`).
 
 Control commands reach a running daemon over distributed Erlang (node
 `shep@<host>`, started by `just shep up`). With no daemon they fall back
@@ -132,7 +144,9 @@ after config changes.
 
 Playbook:
 
-- Start: `SHEP_WORKFLOW=<path> just shep up`, then monitor
+- Start: `just shep build` once (and after any code change — `up` runs the
+  compiled release, not source), then `SHEP_WORKFLOW=<path> just shep up`,
+  then monitor
   `.shep/orchestrator.log` with a FILTERED tail (verdict lines, not
   per-poll noise). That one tail now covers both milestones and
   liveness: each dispatch logs the phase contract, and a quiet agent

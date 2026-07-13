@@ -4,9 +4,12 @@
 #   canonical        herding alias    action
 #   ---------        -------------    ------
 #   demo             trial            full loop with a stub agent, zero setup
-#   up               wake             start orchestrator (background, idempotent)
-#   down             rest             stop orchestrator
-#   start            -                start orchestrator (interactive iex)
+#   build            -                build the mix release → bin/shep (run once, and after code changes)
+#   up               wake             start daemon via bin/shep (background, idempotent)
+#   down             rest             stop daemon gracefully (bin/shep stop)
+#   restart          -                restart daemon in place (bin/shep restart)
+#   console          whistle          live IEx into the running flock (bin/shep remote)
+#   start            -                start orchestrator from source (interactive iex, dev)
 #   run <issue>      fetch <issue>    dispatch an agent on one issue
 #   queue            pen              list templates + queued candidates
 #   ps               flock            status JSON (running, paused, claimed)
@@ -41,44 +44,63 @@ shep cmd id="":
     trail) CMD=session ;;
     field) CMD=view ;;
     drop)  CMD=kill ;;
-    home)  CMD=promote ;;
-    bark)  CMD=speak ;;
-    trial) CMD=demo ;;
-    *)     CMD="{{cmd}}" ;;
+    home)    CMD=promote ;;
+    bark)    CMD=speak ;;
+    trial)   CMD=demo ;;
+    whistle) CMD=console ;;
+    *)       CMD="{{cmd}}" ;;
   esac
 
   need_id() { if [ -z "{{id}}" ]; then echo "Usage: just shep $CMD <id>"; exit 1; fi; }
 
+  # The built release is the shipped artifact; `just shep build` produces it.
+  BIN="_build/prod/rel/shep/bin/shep"
+  need_release() {
+    if [ ! -x "$BIN" ]; then
+      echo "Release not built. Run: just shep build"; exit 1
+    fi
+  }
+
   case "$CMD" in
+    build)
+      MIX_ENV=prod mix release --overwrite
+      ;;
     up)
+      need_release
       mkdir -p .shep
-      if [ -f .shep/orchestrator.pid ]; then
-        OLD_PID=$(cat .shep/orchestrator.pid)
-        if kill -0 "$OLD_PID" 2>/dev/null; then
-          kill "$OLD_PID" 2>/dev/null; sleep 1
-          kill -9 "$OLD_PID" 2>/dev/null || true
-        fi
-        rm -f .shep/orchestrator.pid
+      # Idempotent: a live daemon owns the `shep` node name; don't start a second.
+      if "$BIN" pid >/dev/null 2>&1; then
+        echo "Shep is already awake (pid $("$BIN" pid))"
+        exit 0
       fi
-      nohup elixir --sname shep -S mix run --no-halt > .shep/orchestrator.log 2>&1 &
-      echo $! > .shep/orchestrator.pid
-      echo "Shep is awake (pid $!)"
+      # `start` (not `daemon`) so logs land in .shep/orchestrator.log — the
+      # surface `just shep view` and the handler playbook tail. nohup detaches
+      # it; `bin/shep stop` later tears the VM down gracefully (:init.stop),
+      # draining agents instead of the old kill -9 that orphaned Ports.
+      nohup "$BIN" start > .shep/orchestrator.log 2>&1 &
+      sleep 2
+      if PID=$("$BIN" pid 2>/dev/null); then
+        echo "Shep is awake (pid $PID)"
+      else
+        echo "Shep is waking (check: just shep ps)"
+      fi
       echo "  just shep view     watch the field"
       echo "  just shep down     stop"
       ;;
     down)
-      PID_FILE=".shep/orchestrator.pid"
-      if [ -f "$PID_FILE" ]; then
-        PID=$(cat "$PID_FILE")
-        if kill -0 "$PID" 2>/dev/null; then
-          kill "$PID"; echo "Shep is resting (pid $PID stopped)"
-        else
-          echo "Orchestrator not running (stale pid $PID)"
-        fi
-        rm -f "$PID_FILE"
+      if [ -x "$BIN" ] && "$BIN" pid >/dev/null 2>&1; then
+        "$BIN" stop && echo "Shep is resting"
       else
-        echo "No orchestrator pid file found"
+        echo "Orchestrator not running"
       fi
+      ;;
+    restart)
+      need_release
+      "$BIN" restart && echo "Shep restarted"
+      ;;
+    console)
+      need_release
+      exec "$BIN" remote
       ;;
     start)
       iex -S mix
@@ -228,9 +250,12 @@ shep cmd id="":
       echo ""
       echo "  canonical        herding alias    action"
       echo "  demo             trial            full loop with a stub agent, zero setup"
-      echo "  up               wake             start orchestrator (background)"
-      echo "  down             rest             stop orchestrator"
-      echo "  start            -                start orchestrator (interactive iex)"
+      echo "  build            -                build the mix release → bin/shep"
+      echo "  up               wake             start daemon via bin/shep (background)"
+      echo "  down             rest             stop daemon gracefully"
+      echo "  restart          -                restart daemon in place"
+      echo "  console          whistle          live IEx into the running flock"
+      echo "  start            -                start orchestrator from source (interactive iex)"
       echo "  run <issue>      fetch <issue>    dispatch an agent on one issue"
       echo "  queue            pen              list templates + queued candidates"
       echo "  ps               flock            status JSON"

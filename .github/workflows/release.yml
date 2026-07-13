@@ -1,0 +1,75 @@
+name: release
+
+# The git release IS the built version: pushing a `v*` tag builds a
+# per-platform, ERTS-bundled `mix release` tarball and attaches it to that
+# tag's GitHub release. CI only reacts to a tag push — it never creates or
+# moves tags (the maintainer owns tagging).
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            os: linux
+          - runner: macos-latest
+            os: macos
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # Pinned to the repo's OTP/Elixir (mirrors quality.yml).
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28.5"
+          elixir-version: "1.19.5-otp-28"
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-
+
+      - run: mix deps.get
+
+      - run: MIX_ENV=prod mix release --overwrite
+
+      - name: Package release tarball
+        id: package
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          ARCH="$(uname -m)"
+          case "$ARCH" in
+            x86_64) ARCH=x64 ;;
+            aarch64 | arm64) ARCH=arm64 ;;
+          esac
+          ASSET="shep-${VERSION}-${{ matrix.os }}-${ARCH}.tar.gz"
+          tar -czf "$ASSET" -C _build/prod/rel shep
+          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
+
+      - name: Attach tarball to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          ASSET="${{ steps.package.outputs.asset }}"
+          # Ensure a release exists for this already-pushed tag. --verify-tag
+          # makes `gh` refuse to invent a tag, so CI can only react to one.
+          # The `|| true` covers the race where the other matrix job created
+          # it first; --clobber then makes the upload idempotent on re-runs.
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes || true
+          gh release upload "$TAG" "$ASSET" --clobber
