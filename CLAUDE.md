@@ -56,6 +56,7 @@ command has a herding alias. Both hit the same handler.
 
 ```bash
 just shep build           #          build the mix release → bin/shep (run once, and after code changes)
+just shep smoke           # sniff:   boot the built binary, assert supervision tree is alive (hermetic)
 just shep up              # wake:    start daemon via bin/shep (background, idempotent)
 just shep down            # rest:    stop daemon gracefully (bin/shep stop)
 just shep restart         #          restart daemon in place (bin/shep restart)

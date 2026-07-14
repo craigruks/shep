@@ -44,6 +44,13 @@ jobs:
 
       - run: MIX_ENV=prod mix release --overwrite
 
+      # Boot the just-built binary before it can become a release asset.
+      # smoke/0 is hermetic (memory tracker, no network, no secrets); a
+      # non-zero exit fails the job so a binary that will not boot is
+      # never packaged or attached.
+      - name: Smoke-test the release binary
+        run: _build/prod/rel/shep/bin/shep eval "Shep.Release.smoke()"
+
       - name: Package release tarball
         id: package
         run: |

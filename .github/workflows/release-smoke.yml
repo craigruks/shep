@@ -1,0 +1,40 @@
+name: release-smoke
+
+# `mix quality` runs against source (test env, ExUnit) and structurally
+# cannot catch release-only failures: a runtime.exs error, a missing
+# runtime dependency, or a supervision tree that fails to boot only
+# surface when the MIX_ENV=prod binary actually starts. This job builds
+# the release and boots it on every PR, so a change that breaks the
+# binary blocks merge instead of surfacing at tag time.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  release-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28.5"
+          elixir-version: "1.19.5-otp-28"
+
+      # Shares the deps/_build cache with quality.yml so it stays fast.
+      - uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-
+
+      - run: mix deps.get
+
+      - run: MIX_ENV=prod mix release --overwrite
+
+      # Hermetic boot check (memory tracker, no network, no secrets).
+      - name: Smoke-test the release binary
+        run: _build/prod/rel/shep/bin/shep eval "Shep.Release.smoke()"
