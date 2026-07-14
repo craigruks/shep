@@ -298,8 +298,8 @@ which is exactly the file an arriving agent reads first.
   bounds *supervision* (timeouts, retries, kills), not *capability*.
   Run it on repos and machines you trust it with, and put real
   isolation (containers, separate accounts) around it if the stakes
-  demand that. LayerKick runs it against an account that physically
-  cannot reach production.
+  demand that: give it an account that physically cannot reach
+  production.
 
 ## License
 
