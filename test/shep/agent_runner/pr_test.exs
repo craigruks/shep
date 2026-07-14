@@ -65,6 +65,10 @@ defmodule Shep.AgentRunner.PRCreateTest do
       ["pr", "edit" | _] = args ->
         send(test_pid, {:gh, args})
         {:error, "could not add label: 'agent: claude-code' not found"}
+
+      ["pr", "comment" | _] = args ->
+        send(test_pid, {:gh, args})
+        {:ok, ""}
     end)
 
     wt = clean_committed_worktree("shep/pr-1")
@@ -80,12 +84,65 @@ defmodule Shep.AgentRunner.PRCreateTest do
     assert "pr-created" == Shep.Tracker.Memory.get_status("pr-1")
   end
 
+  test "signs the PR by default with a Herded by Shep comment" do
+    test_pid = self()
+
+    Application.put_env(:shep, :gh_runner, fn
+      ["pr", "create" | _] -> {:ok, "https://github.com/org/repo/pull/11"}
+      ["pr", "edit" | _] -> {:ok, ""}
+      ["pr", "comment" | _] = args -> send(test_pid, {:gh, args}) && {:ok, ""}
+    end)
+
+    wt = clean_committed_worktree("shep/pr-3")
+    task = %Shep.Task{id: "pr-3", branch: "shep/pr-3", prompt: "p"}
+
+    assert {:ok, url} = PR.create(%Complete{summary: "did it"}, task, wt, config())
+
+    assert_received {:gh, ["pr", "comment", ^url, "--repo", "org/repo", "--body", body]}
+    assert body =~ "Herded by Shep"
+  end
+
+  test "pr.sign false skips the signature comment entirely" do
+    test_pid = self()
+
+    Application.put_env(:shep, :gh_runner, fn
+      ["pr", "create" | _] -> {:ok, "https://github.com/org/repo/pull/12"}
+      ["pr", "edit" | _] -> {:ok, ""}
+      ["pr", "comment" | _] = args -> send(test_pid, {:comment, args}) && {:ok, ""}
+    end)
+
+    wt = clean_committed_worktree("shep/pr-4")
+    task = %Shep.Task{id: "pr-4", branch: "shep/pr-4", prompt: "p"}
+    cfg = put_in(config(), ["pr"], %{"sign" => false})
+
+    assert {:ok, _url} = PR.create(%Complete{summary: "did it"}, task, wt, cfg)
+
+    refute_received {:comment, _}
+  end
+
+  test "a failed signature comment never sinks the PR creation" do
+    Application.put_env(:shep, :gh_runner, fn
+      ["pr", "create" | _] -> {:ok, "https://github.com/org/repo/pull/13"}
+      ["pr", "edit" | _] -> {:ok, ""}
+      ["pr", "comment" | _] -> {:error, "gh: comment failed"}
+    end)
+
+    wt = clean_committed_worktree("shep/pr-5")
+    task = %Shep.Task{id: "pr-5", branch: "shep/pr-5", prompt: "p"}
+
+    assert {:ok, "https://github.com/org/repo/pull/13"} =
+             PR.create(%Complete{summary: "did it"}, task, wt, config())
+
+    assert "pr-created" == Shep.Tracker.Memory.get_status("pr-5")
+  end
+
   test "no_merge tasks request the shep:no-merge label" do
     test_pid = self()
 
     Application.put_env(:shep, :gh_runner, fn
       ["pr", "create" | _] -> {:ok, "https://github.com/org/repo/pull/10"}
       ["pr", "edit" | _] = args -> send(test_pid, {:gh, args}) && {:ok, ""}
+      ["pr", "comment" | _] -> {:ok, ""}
     end)
 
     wt = clean_committed_worktree("shep/pr-2")
