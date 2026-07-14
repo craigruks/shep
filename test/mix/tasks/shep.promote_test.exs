@@ -152,7 +152,7 @@ defmodule Mix.Tasks.Shep.PromoteTest do
     # the tracking ref that `git cherry` compares against.
     root = tmp_dir("shep_promote_remote")
     bare = Path.join(root, "origin.git")
-    git!(root, ["init", "-q", "--bare", bare])
+    git!(root, ["init", "-q", "--bare", "-b", "main", bare])
 
     work = Path.join(root, "work")
     git!(root, ["clone", "-q", bare, work])
