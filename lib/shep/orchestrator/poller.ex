@@ -11,16 +11,42 @@ defmodule Shep.Orchestrator.Poller do
 
   alias Shep.Orchestrator.Dispatch
 
+  @placeholder_repo "your-org/your-repo"
+
   @doc "Poll the tracker and dispatch any new, dependency-clear candidates."
   @spec tick(struct()) :: struct()
-  def tick(state) do
-    Logger.debug("Orchestrator tick: polling tracker")
+  def tick(state), do: tick(state, current_config())
 
+  @doc """
+  Config-injected tick. Emits one `:info` pulse per tick so the release
+  daemon log shows a sign of life between milestones. When `tracker.repo`
+  is blank or the template placeholder, it fails loud with a `:warning`
+  and skips the fetch — a misconfiguration must announce itself (#30).
+  """
+  @spec tick(struct(), map()) :: struct()
+  def tick(state, config) do
+    repo = get_in(config, ["tracker", "repo"])
+
+    if placeholder_repo?(repo) do
+      Logger.warning(
+        "tracker.repo is #{inspect(repo)} (the template default) — set tracker.repo in your " <>
+          "WORKFLOW.md or pass SHEP_WORKFLOW. Not polling."
+      )
+
+      state
+    else
+      Logger.info("tick: watching #{repo} — #{tick_status(state)}")
+      poll_and_dispatch(state, repo)
+    end
+  rescue
+    e ->
+      Logger.error("Tick error: #{Exception.message(e)}")
+      state
+  end
+
+  defp poll_and_dispatch(state, repo) do
     case Shep.Tracker.fetch_candidates() do
       {:ok, tasks} ->
-        config = Shep.Config.current!()
-        repo = get_in(config, ["tracker", "repo"])
-
         Enum.reduce(tasks, state, fn task, acc ->
           already_known =
             Map.has_key?(acc.running, task.id) ||
@@ -40,10 +66,31 @@ defmodule Shep.Orchestrator.Poller do
         Logger.warning("Tracker poll failed: #{inspect(reason)}")
         state
     end
-  rescue
-    e ->
-      Logger.error("Tick error: #{Exception.message(e)}")
-      state
+  end
+
+  defp placeholder_repo?(nil), do: true
+
+  defp placeholder_repo?(repo) when is_binary(repo),
+    do: String.trim(repo) in ["", @placeholder_repo]
+
+  defp placeholder_repo?(_), do: true
+
+  defp tick_status(state) do
+    running = map_size(state.running)
+    claimed = MapSet.size(state.claimed)
+
+    if running == 0 and claimed == 0 do
+      "idle (0 running, 0 claimed)"
+    else
+      "#{running} running, #{claimed} claimed#{running_suffix(state)}"
+    end
+  end
+
+  defp running_suffix(state) do
+    case Map.keys(state.running) do
+      [] -> ""
+      ids -> " (" <> (ids |> Enum.map_join(", ", &"task #{&1} running")) <> ")"
+    end
   end
 
   @doc "Whether a task's declared dependencies are all resolved."

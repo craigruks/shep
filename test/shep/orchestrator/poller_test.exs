@@ -1,9 +1,42 @@
 defmodule Shep.Orchestrator.PollerTest do
-  use ExUnit.Case, async: true
+  # async: false — the tick tests install an app-env tracker adapter.
+  use ExUnit.Case, async: false
+
+  import ExUnit.CaptureLog
 
   alias Shep.Orchestrator.Poller
 
+  # A tracker stand-in that pings the test process on fetch, so we can assert
+  # the placeholder guard skips the fetch entirely (no network boundary crossed).
+  defmodule TrackerSpy do
+    @moduledoc false
+    def fetch_candidates do
+      if pid = Application.get_env(:shep, :test_tracker_spy), do: send(pid, :fetch_called)
+      {:ok, []}
+    end
+
+    def claim(_id), do: :ok
+    def update_status(_id, _status), do: :ok
+    def add_comment(_id, _body), do: :ok
+  end
+
   defp task(id), do: %Shep.Task{id: id, branch: "shep/#{id}", prompt: "p"}
+
+  defp config(repo), do: %{"tracker" => %{"repo" => repo}}
+
+  # The suite runs at :warning; the tick pulse is :info. Capturing it means
+  # lowering the primary level for the duration. Safe here — this module is
+  # async: false, so nothing else logs concurrently.
+  defp capture_info(fun) do
+    prev = Logger.level()
+    Logger.configure(level: :info)
+
+    try do
+      capture_log(fun)
+    after
+      Logger.configure(level: prev)
+    end
+  end
 
   # A live agent process the watchdog can kill, plus a running entry addressed
   # by `token`. `quiet_ms` back-dates last_output_at so we can drive both cadences.
@@ -30,6 +63,64 @@ defmodule Shep.Orchestrator.PollerTest do
     test "a task with no dependencies is always clear" do
       assert Poller.deps_resolved?("org/repo", %{depends_on: nil})
       assert Poller.deps_resolved?("org/repo", %{depends_on: []})
+    end
+  end
+
+  describe "tick/2 visible pulse + placeholder guard" do
+    setup do
+      Application.put_env(:shep, :tracker_adapter, TrackerSpy)
+      Application.put_env(:shep, :test_tracker_spy, self())
+
+      on_exit(fn ->
+        Application.delete_env(:shep, :tracker_adapter)
+        Application.delete_env(:shep, :test_tracker_spy)
+      end)
+
+      :ok
+    end
+
+    test "emits one info pulse per tick naming the repo and idle counts" do
+      log =
+        capture_info(fn ->
+          Poller.tick(%Shep.Orchestrator{}, config("craigruks/shep"))
+        end)
+
+      assert log =~ "tick: watching craigruks/shep"
+      assert log =~ "idle (0 running, 0 claimed)"
+    end
+
+    test "a running task is reflected in the tick line (count > 0)" do
+      state = %Shep.Orchestrator{running: %{"30" => %{}}}
+
+      log =
+        capture_info(fn ->
+          Poller.tick(state, config("craigruks/shep"))
+        end)
+
+      assert log =~ "1 running"
+      assert log =~ "task 30 running"
+    end
+
+    test "a real repo fetches from the tracker normally" do
+      Poller.tick(%Shep.Orchestrator{}, config("craigruks/shep"))
+      assert_receive :fetch_called, 500
+    end
+
+    test "the template placeholder repo warns loudly and skips the fetch" do
+      log =
+        capture_log(fn ->
+          Poller.tick(%Shep.Orchestrator{}, config("your-org/your-repo"))
+        end)
+
+      assert log =~ ~s(tracker.repo is "your-org/your-repo")
+      assert log =~ "Not polling"
+      refute_receive :fetch_called, 100
+    end
+
+    test "a nil/blank repo also skips the fetch" do
+      Poller.tick(%Shep.Orchestrator{}, config(nil))
+      Poller.tick(%Shep.Orchestrator{}, config("   "))
+      refute_receive :fetch_called, 100
     end
   end
 

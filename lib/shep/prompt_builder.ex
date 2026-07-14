@@ -3,16 +3,35 @@ defmodule Shep.PromptBuilder do
 
   @base_file "base.md"
 
-  @doc "Build a full prompt for a task."
+  @doc """
+  Compose base + task template, leaving every `{{KEY}}` (including
+  `{{TASK_BODY}}`) as a placeholder. The result is trusted text only —
+  no issue-supplied content is spliced in yet — so it is safe to run
+  through `Shep.Prompt.expand/3`, whose `bash -c` shell blocks then see
+  only `priv/prompts/` templates. Substitution happens afterward in
+  `build_expanded/2`. See #30: issue-body prose must never reach `bash -c`.
+  """
   @spec build(Shep.Task.t()) :: String.t()
   def build(%Shep.Task{} = task) do
     base = read_template(@base_file)
     template = load_task_template(task.type)
-    body = task.prompt || ""
 
-    base
-    |> String.replace("{{TASK_BODY}}", template <> "\n\n" <> body)
-    |> inject_args(task.prompt_args)
+    String.replace(base, "{{TASK_BODY}}", template <> "\n\n{{TASK_BODY}}")
+  end
+
+  @doc """
+  Build a task's final prompt: expand the trusted template's shell blocks
+  in `cwd`, then substitute the raw issue body and `prompt_args` as plain
+  text. Key substitution runs after shell expansion, so neither the body
+  nor any arg value is ever executed — it can only appear literally.
+  """
+  @spec build_expanded(Shep.Task.t(), String.t()) :: String.t()
+  def build_expanded(%Shep.Task{} = task, cwd) when is_binary(cwd) do
+    args = Map.put(task.prompt_args || %{}, "TASK_BODY", task.prompt || "")
+
+    task
+    |> build()
+    |> Shep.Prompt.expand(args, cwd)
   end
 
   @doc "List available template names."
@@ -64,11 +83,5 @@ defmodule Shep.PromptBuilder do
       {:ok, content} -> {:ok, content}
       {:error, _} -> :error
     end
-  end
-
-  defp inject_args(prompt, args) when is_map(args) do
-    Enum.reduce(args, prompt, fn {key, value}, acc ->
-      String.replace(acc, "{{#{key}}}", value)
-    end)
   end
 end
