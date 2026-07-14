@@ -47,6 +47,7 @@ shep cmd id="":
     home)    CMD=promote ;;
     bark)    CMD=speak ;;
     trial)   CMD=demo ;;
+    sniff)   CMD=smoke ;;
     whistle) CMD=console ;;
     *)       CMD="{{cmd}}" ;;
   esac
@@ -64,6 +65,16 @@ shep cmd id="":
   case "$CMD" in
     build)
       MIX_ENV=prod mix release --overwrite
+      # Never leave a locally-built binary silently broken: boot it once.
+      # smoke/0 is hermetic (memory tracker, no network, no secrets).
+      "$BIN" eval "Shep.Release.smoke()"
+      ;;
+    smoke)
+      # Post-build boot check: prove the built binary starts and its
+      # supervision tree answers. Hermetic — no GitHub, no secrets, no
+      # network. Non-zero exit on any boot failure fails the caller.
+      need_release
+      "$BIN" eval "Shep.Release.smoke()"
       ;;
     up)
       need_release
@@ -250,7 +261,8 @@ shep cmd id="":
       echo ""
       echo "  canonical        herding alias    action"
       echo "  demo             trial            full loop with a stub agent, zero setup"
-      echo "  build            -                build the mix release → bin/shep"
+      echo "  build            -                build the mix release → bin/shep (+ smoke)"
+      echo "  smoke            sniff            boot the built binary; assert the tree is alive"
       echo "  up               wake             start daemon via bin/shep (background)"
       echo "  down             rest             stop daemon gracefully"
       echo "  restart          -                restart daemon in place"
