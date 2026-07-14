@@ -176,6 +176,20 @@ hooks:     { on_worktree_ready: "pnpm install --frozen-lockfile" }
 staging:   { base_branch: "staging", pr_target: "staging" }
 ```
 
+## Herded by Shep
+
+When Shep opens a PR, it leaves a one-line signature comment:
+
+> 🐑 Herded by Shep. [What's this?](#herded-by-shep)
+
+A fun, visible trace that the PR came from Shep — searchable across GitHub,
+the same courtesy dependabot and friends pay. It is **on by default**.
+Don't want it? One line in your `WORKFLOW.md`:
+
+```yaml
+pr: { sign: false }
+```
+
 ## Shepherding another repo
 
 Shep cuts worktrees from `workspace.repo`, which does not have to be the

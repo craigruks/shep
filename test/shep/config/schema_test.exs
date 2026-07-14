@@ -24,6 +24,14 @@ defmodule Shep.Config.SchemaTest do
       assert get_in(config, ["agent", "watchdog_interval_ms"]) == 15_000
       assert get_in(config, ["agent", "heartbeat_quiet_ms"]) == 30_000
     end
+
+    test "pr.sign defaults to true and survives a partial override" do
+      {:ok, config} = Schema.validate(%{})
+      assert get_in(config, ["pr", "sign"]) == true
+
+      {:ok, off} = Schema.validate(%{"pr" => %{"sign" => false}})
+      assert get_in(off, ["pr", "sign"]) == false
+    end
   end
 
   describe "path expansion" do

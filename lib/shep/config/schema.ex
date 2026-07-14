@@ -27,6 +27,9 @@ defmodule Shep.Config.Schema do
       "base_branch" => "staging",
       "pr_target" => "staging"
     },
+    "pr" => %{
+      "sign" => true
+    },
     "tracker" => %{
       "kind" => "github",
       "repo" => nil

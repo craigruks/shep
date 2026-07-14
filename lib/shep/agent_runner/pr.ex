@@ -69,6 +69,7 @@ defmodule Shep.AgentRunner.PR do
           {:ok, url} ->
             Logger.info("PR created: #{url}")
             apply_pr_label(repo, url, label)
+            sign_pr(repo, url, config)
             Shep.Tracker.update_status(task.id, "pr-created")
             {:ok, url}
 
@@ -87,5 +88,24 @@ defmodule Shep.AgentRunner.PR do
       {:ok, _} -> :ok
       {:error, err} -> Logger.warning("Could not label PR (#{label}): #{err}")
     end
+  end
+
+  # Best-effort branded signature. Cosmetic and discoverable; a failure to
+  # comment must never sink a run. Toggled off with `pr.sign: false`.
+  defp sign_pr(repo, pr_url, config) do
+    if get_in(config, ["pr", "sign"]) == false do
+      :ok
+    else
+      case Shep.GH.run(["pr", "comment", pr_url, "--repo", repo, "--body", signature()]) do
+        {:ok, _} -> :ok
+        {:error, err} -> Logger.warning("Could not sign PR: #{err}")
+      end
+    end
+  end
+
+  @doc "The one-line branded PR signature. `Herded by Shep` is a stable, searchable phrase."
+  @spec signature() :: String.t()
+  def signature do
+    "🐑 Herded by Shep. [What's this?](https://github.com/craigruks/shep#herded-by-shep)"
   end
 end
