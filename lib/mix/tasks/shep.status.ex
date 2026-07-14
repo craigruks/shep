@@ -9,23 +9,30 @@ defmodule Mix.Tasks.Shep.Status do
     Application.put_env(:logger, :level, :none)
     {_source, snapshot} = Shep.Control.call(Shep.Orchestrator, :snapshot, [])
 
+    snapshot
+    |> project()
+    |> Jason.encode!(pretty: true)
+    |> IO.puts()
+  end
+
+  @doc """
+  Project a daemon snapshot into the reportable JSON shape.
+
+  `elapsed_ms`/`idle_ms` are passed through verbatim from the snapshot,
+  which computes them daemon-side against a valid monotonic origin. This
+  task never subtracts monotonic timestamps itself: a control-VM query
+  has no shared origin with the daemon, so any local subtraction would be
+  meaningless (and often negative).
+  """
+  @spec project(map()) :: map()
+  def project(snapshot) do
     running =
       Map.new(snapshot[:running] || %{}, fn {id, info} ->
-        elapsed =
-          if info[:started_at],
-            do: System.monotonic_time(:millisecond) - info[:started_at],
-            else: nil
-
-        idle =
-          if info[:last_output_at],
-            do: System.monotonic_time(:millisecond) - info[:last_output_at],
-            else: nil
-
         {id,
          %{
            type: info[:task_type] || "custom",
-           elapsed_ms: elapsed,
-           idle_ms: idle
+           elapsed_ms: info[:elapsed_ms],
+           idle_ms: info[:idle_ms]
          }}
       end)
 
@@ -39,14 +46,12 @@ defmodule Mix.Tasks.Shep.Status do
          }}
       end)
 
-    output = %{
+    %{
       running: running,
       running_count: map_size(running),
       paused: paused,
       paused_count: map_size(paused),
       claimed: snapshot[:claimed] || []
     }
-
-    IO.puts(Jason.encode!(output, pretty: true))
   end
 end

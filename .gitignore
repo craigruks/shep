@@ -2,3 +2,4 @@
 /deps/
 /.shep/
 /cover/
+erl_crash.dump
