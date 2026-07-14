@@ -71,7 +71,7 @@ just shep logs <id>       # watch:   tail a task's raw stdout
 just shep session <issue> # trail:   pretty-tail the agent's Claude session
 just shep kill <id>       # drop:    kill a stuck agent (no retry, worktree kept)
 just shep view            # field:   tmux: orchestrator + auto-spawning task panes
-just shep promote         # home:    promote staging → main, transition issues
+just shep promote         # home:    open the staging→main promotion PR
 just shep help            #           full command table
 ```
 

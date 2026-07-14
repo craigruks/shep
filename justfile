@@ -20,7 +20,7 @@
 #   session <issue>  trail <issue>    pretty-tail the agent's Claude session
 #   kill <id>        drop <id>        kill a stuck agent (no retry, worktree kept)
 #   view             field            tmux: orchestrator + auto-spawning task panes
-#   promote          home             promote staging → main, transition issues
+#   promote          home             open the staging→main promotion PR
 #   triage           -                triage checklist from in-review issues
 #   quality          -                format + credo --strict + tests
 #   bootstrap <path> -                install deps in an agent worktree
@@ -278,7 +278,7 @@ shep cmd id="":
       echo "  session <issue>  trail <issue>    pretty-tail the agent's Claude session"
       echo "  view             field            tmux: orchestrator + task panes"
       echo "  kill <id>        drop <id>        kill a stuck agent (no retry, worktree kept)"
-      echo "  promote          home             promote staging → main"
+      echo "  promote          home             open the staging→main promotion PR"
       echo "  triage           -                triage checklist from in-review issues"
       echo "  quality          -                format + credo --strict + tests"
       echo "  bootstrap <path> -                install deps in an agent worktree"
