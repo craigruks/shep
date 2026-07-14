@@ -44,6 +44,39 @@ defmodule Shep.Orchestrator.SnapshotTest do
            } = snap.running["s1"]
   end
 
+  test "read enriches a running task with non-negative elapsed_ms/idle_ms" do
+    now = System.monotonic_time(:millisecond)
+    task = %Shep.Task{id: "s1", type: "custom", branch: "b", prompt: "p"}
+
+    state = %Shep.Orchestrator{
+      running: %{
+        "s1" => %{task: task, started_at: now, last_output_at: now}
+      }
+    }
+
+    Snapshot.write(state)
+    entry = Snapshot.read().running["s1"]
+
+    assert entry.elapsed_ms >= 0
+    assert entry.idle_ms >= 0
+  end
+
+  test "read recomputes deltas each call so elapsed_ms grows with time" do
+    now = System.monotonic_time(:millisecond)
+    task = %Shep.Task{id: "s1", type: "custom", branch: "b", prompt: "p"}
+
+    state = %Shep.Orchestrator{
+      running: %{"s1" => %{task: task, started_at: now, last_output_at: now}}
+    }
+
+    Snapshot.write(state)
+    first = Snapshot.read().running["s1"].elapsed_ms
+    Process.sleep(5)
+    second = Snapshot.read().running["s1"].elapsed_ms
+
+    assert second > first
+  end
+
   test "write projects paused entries and the claimed set" do
     task = %Shep.Task{id: "s2", type: "custom", branch: "b", prompt: "p"}
 

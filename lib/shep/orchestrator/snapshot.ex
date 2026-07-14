@@ -17,14 +17,44 @@ defmodule Shep.Orchestrator.Snapshot do
     :ok
   end
 
-  @doc "Read the latest snapshot, or an empty projection if none written yet."
+  @doc """
+  Read the latest snapshot, or an empty projection if none written yet.
+
+  Enriches each running task with `elapsed_ms`/`idle_ms`, computed here
+  against the daemon's `System.monotonic_time` so the deltas are valid.
+  The stored `started_at`/`last_output_at` are per-VM monotonic stamps;
+  computing the deltas on the read side (which runs on the daemon node via
+  `Shep.Control` RPC) keeps a control-VM caller from subtracting across
+  unrelated monotonic origins. Raw stamps stay in the projection for
+  same-VM callers; the watchdog reads its own state, not this table.
+  """
   @spec read() :: map()
   def read do
     case :ets.lookup(@table, :state) do
-      [{:state, data}] -> data
+      [{:state, data}] -> enrich(data)
       [] -> %{running: %{}}
     end
   end
+
+  defp enrich(%{running: running} = data) do
+    now = System.monotonic_time(:millisecond)
+
+    enriched =
+      Map.new(running, fn {id, entry} ->
+        {id,
+         Map.merge(entry, %{
+           elapsed_ms: delta(now, entry[:started_at]),
+           idle_ms: delta(now, entry[:last_output_at])
+         })}
+      end)
+
+    %{data | running: enriched}
+  end
+
+  defp enrich(data), do: data
+
+  defp delta(_now, nil), do: nil
+  defp delta(now, stamp) when is_integer(stamp), do: now - stamp
 
   @doc "Project and store the orchestrator state for zero-contention reads."
   @spec write(struct()) :: :ok
