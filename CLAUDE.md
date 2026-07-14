@@ -103,6 +103,11 @@ Two branches, one human gate.
 - **`main` is release-only.** It takes no direct pushes. It advances only
   through a *promotion PR* from `staging` that a human reviews and merges.
   That merge is the single human gate in the pipeline.
+- **The promotion PR merges with a merge commit (`--no-ff`), never
+  squash** — so staging's history stays connected to `main` and promotion
+  PR bodies never re-list already-promoted commits. Feature PRs into
+  `staging` still squash. A `promotion-guard` workflow on `main` fails the
+  build if the tip advanced via a non-merge commit.
 - **Both branches** require `quality` + `release-smoke` green before a
   merge (branch rulesets), so a change that breaks the release cannot land.
 - **Releases:** bump the version on `staging`, open the promotion PR, tag
