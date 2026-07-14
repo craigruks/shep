@@ -36,16 +36,26 @@ defmodule Shep.WorktreeTest do
 
   describe "create/3 handles stale state" do
     test "cleanup_stale removes leftover directory before creating worktree" do
-      root =
-        Path.join(System.tmp_dir!(), "shep_stale_test_#{System.unique_integer([:positive])}")
+      n = System.unique_integer([:positive])
+      repo = Path.join(System.tmp_dir!(), "shep_stale_repo_#{n}")
+      root = Path.join(System.tmp_dir!(), "shep_stale_root_#{n}")
+      File.mkdir_p!(repo)
+      on_exit(fn -> File.rm_rf!(repo) && File.rm_rf!(root) end)
 
-      branch = "test-stale-#{System.unique_integer([:positive])}"
-      path = Path.join(root, Worktree.sanitize_branch_for_test(branch))
+      {_, 0} = System.cmd("git", ["-C", repo, "init", "-q", "-b", "main"])
+      {_, 0} = System.cmd("git", ["-C", repo, "config", "user.email", "test@example.com"])
+      {_, 0} = System.cmd("git", ["-C", repo, "config", "user.name", "Test"])
+      File.write!(Path.join(repo, "flock.txt"), "sheep")
+      {_, 0} = System.cmd("git", ["-C", repo, "add", "."])
+      {_, 0} = System.cmd("git", ["-C", repo, "commit", "-qm", "init"])
+
+      branch = "test-stale-#{n}"
+      path = Path.expand(Path.join(root, Worktree.sanitize_branch_for_test(branch)))
 
       File.mkdir_p!(path)
       assert File.dir?(path), "precondition: stale directory exists"
 
-      result = Worktree.create(branch, "main", root)
+      result = Worktree.create(branch, "main", root, repo)
 
       case result do
         {:ok, created_path} ->
@@ -55,8 +65,6 @@ defmodule Shep.WorktreeTest do
           refute String.contains?(msg, "already exists"),
                  "create must not fail with 'already exists' when stale dir is present: #{msg}"
       end
-
-      File.rm_rf!(root)
     end
 
     test "sanitize_branch replaces non-alphanumeric chars but keeps hyphens" do
