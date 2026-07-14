@@ -7,9 +7,9 @@ name: release-smoke
 # the release and boots it on every PR, so a change that breaks the
 # binary blocks merge instead of surfacing at tag time.
 on:
+  pull_request:
   push:
     branches: [main]
-  pull_request:
 
 jobs:
   release-smoke:
