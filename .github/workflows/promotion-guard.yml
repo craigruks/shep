@@ -1,0 +1,29 @@
+# Detect-and-correct guard: this runs AFTER the merge lands on main.
+# GitHub cannot restrict the merge *method* per-branch, so the squash
+# button stays visible on the promotion PR and cannot be blocked
+# pre-merge. This workflow catches a mistaken squash/rebase immediately
+# by failing when main's tip is not a merge commit, prompting a revert
+# and re-merge as a merge commit (--no-ff).
+name: promotion-guard
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  require-merge-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Require main to advance via a merge commit
+        run: |
+          parents=$(git rev-list --parents -n 1 HEAD | wc -w)
+          parent_count=$((parents - 1))
+          echo "main tip $(git rev-parse --short HEAD) has ${parent_count} parent(s)"
+          if [ "$parent_count" -lt 2 ]; then
+            echo "::error::main advanced via a non-merge commit — promotions must merge with --no-ff (never squash) to keep staging's ancestry connected to main. Revert this commit on main and re-merge the promotion PR as a merge commit."
+            exit 1
+          fi
