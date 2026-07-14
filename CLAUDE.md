@@ -93,6 +93,26 @@ Control commands reach a running daemon over distributed Erlang (node
 to a local one-shot node. `just shep demo` runs the whole loop with a
 stub agent and a memory tracker; nothing is pushed.
 
+## Branch flow
+
+Two branches, one human gate.
+
+- **`staging` is the integration branch.** Dogfood and feature PRs target
+  `staging` (the flock config's `pr_target`). Green PRs merge here; this
+  half runs without a human.
+- **`main` is release-only.** It takes no direct pushes. It advances only
+  through a *promotion PR* from `staging` that a human reviews and merges.
+  That merge is the single human gate in the pipeline.
+- **Both branches** require `quality` + `release-smoke` green before a
+  merge (branch rulesets), so a change that breaks the release cannot land.
+- **Releases:** bump the version on `staging`, open the promotion PR, tag
+  `vX.Y.Z` on `main` after it merges. The tag push builds the smoke-gated
+  tarballs.
+
+The automation opens the promotion PR and stops; reading and merging it is
+the human's job. GitHub blocks self-approval, so on a solo repo this gate
+is convention plus the rule that `main` accepts no direct pushes.
+
 ## Agent Selection
 
 `agent.model` in WORKFLOW.md picks the Claude model (default "opus",
