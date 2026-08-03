@@ -130,14 +130,14 @@ defmodule Shep.WorkspaceTest do
     end
   end
 
-  describe "cleanup/3" do
+  describe "cleanup/4" do
     test "a failed local task keeps its checkout for diagnosis" do
       dir = tmp_repo()
       ws = Workspace.local(dir)
+      task = %Shep.Task{id: "1", branch: "b", prompt: "p"}
+      failed = %Shep.Completion.Failed{reason: "x", recoverable: false}
 
-      assert :ok =
-               Workspace.cleanup(ws, %Shep.Completion.Failed{reason: "x", recoverable: false}, %{})
-
+      assert :ok = Workspace.cleanup(ws, task, failed, %{})
       assert File.dir?(dir)
     end
   end

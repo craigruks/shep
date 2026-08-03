@@ -169,7 +169,13 @@ defmodule Shep.Workspace do
     end
   end
 
-  @doc "Run git in the workspace checkout."
+  @doc """
+  Run git in the workspace checkout.
+
+  Output is merged stderr-into-stdout for logging, and a sandbox prefixes
+  it with the CLI's echo of the command — use `Sandbox.capture/1` when
+  stdout has to be parsed, as `dirty?/1` does.
+  """
   @spec git(t(), [String.t()]) :: {:ok, String.t()} | {:error, String.t()}
   def git(%__MODULE__{location: :vercel, sandbox: sandbox, path: path}, args) do
     Sandbox.run(["exec", sandbox, "-w", path, "--", "git" | args])
@@ -232,32 +238,61 @@ defmodule Shep.Workspace do
   end
 
   @doc """
-  Tear down the workspace, or preserve it for diagnosis after a failure.
+  Tear down the workspace once a task is over.
 
-  A preserved sandbox is still on a clock: it dies at its configured
-  timeout whether or not anyone looks at it.
+  A local worktree is preserved after a failure: it is free to keep and
+  it is where you go to diagnose. A sandbox is not free, so a failed one
+  is rescued rather than kept — the task branch is pushed so the agent's
+  commits survive as a remote branch, then the machine is destroyed. Set
+  `sandbox.keep_on_failure` to hold it open for live debugging instead,
+  remembering it still dies at its own timeout.
   """
-  @spec cleanup(t(), struct(), map()) :: :ok
-  def cleanup(%__MODULE__{location: :vercel, sandbox: sandbox}, %Shep.Completion.Failed{}, _config) do
-    Logger.info("Preserving sandbox for failed task: #{sandbox} (expires at its timeout)")
+  @spec cleanup(t(), Shep.Task.t(), struct(), map()) :: :ok
+  def cleanup(
+        %__MODULE__{location: :vercel, sandbox: sandbox} = workspace,
+        %Shep.Task{} = task,
+        %Shep.Completion.Failed{},
+        config
+      ) do
+    if get_in(config, ["sandbox", "keep_on_failure"]) do
+      Logger.info("Keeping sandbox #{sandbox} for diagnosis (expires at its timeout)")
+    else
+      rescue_branch(workspace, task)
+      Sandbox.rm(sandbox)
+      Logger.info("Removed sandbox after failure: #{sandbox}")
+    end
+
     :ok
   end
 
-  def cleanup(%__MODULE__{location: :vercel, sandbox: sandbox}, _completion, _config) do
+  def cleanup(%__MODULE__{location: :vercel, sandbox: sandbox}, _task, _completion, _config) do
     Sandbox.rm(sandbox)
     Logger.info("Removed sandbox: #{sandbox}")
     :ok
   end
 
-  def cleanup(%__MODULE__{path: path}, %Shep.Completion.Failed{}, _config) do
+  def cleanup(%__MODULE__{path: path}, _task, %Shep.Completion.Failed{}, _config) do
     Logger.info("Preserving worktree for failed task: #{path}")
     :ok
   end
 
-  def cleanup(%__MODULE__{path: path}, _completion, config) do
+  def cleanup(%__MODULE__{path: path}, _task, _completion, config) do
     repo = get_in(config, ["workspace", "repo"]) || "."
     Shep.Worktree.remove(path, repo)
     :ok
+  end
+
+  # Best effort by design: the sandbox is going away either way, and a
+  # failed task often has nothing to push. CI runs on pull requests and
+  # pushes to main, so a task branch with no PR triggers nothing.
+  defp rescue_branch(workspace, %Shep.Task{branch: branch}) do
+    case git(workspace, ["push", "origin", branch]) do
+      {:ok, _} ->
+        Logger.info("Pushed #{branch} before releasing the sandbox")
+
+      {:error, out} ->
+        Logger.info("Nothing rescued from #{branch}: #{Shep.Goal.tail(out, 200)}")
+    end
   end
 
   @doc "Human-readable location of the workspace, for logs and status."

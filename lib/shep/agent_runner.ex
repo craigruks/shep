@@ -77,7 +77,7 @@ defmodule Shep.AgentRunner do
                }, nil}
           end
 
-        Workspace.cleanup(workspace, final, config)
+        Workspace.cleanup(workspace, task, final, config)
         duration = System.monotonic_time(:millisecond) - started_at
 
         result = %Shep.RunResult{

@@ -139,12 +139,18 @@ Orthogonal to *what* runs: *where* it runs. `agent.location` picks the
 fleet default (`local`, the git worktree); a `shep:sandbox` label runs
 that issue in a Vercel sandbox instead — provisioned from
 `sandbox.snapshot`, cloned over https with a token from
-`sandbox.github_token_command`, torn down on success and kept on
-failure. `Shep.Workspace` is the whole boundary: prepare, run the agent,
-run a shell command, run git, clean up. `Shep.AgentRunner.Exec` is
-location-blind, because `sandbox exec` streams line by line and
-propagates exit codes — a remote turn is the same Port with a different
-command.
+`sandbox.github_token_command`. `Shep.Workspace` is the whole boundary:
+prepare, run the agent, run a shell command, run git, clean up.
+`Shep.AgentRunner.Exec` is location-blind, because `sandbox exec` streams
+line by line and propagates exit codes — a remote turn is the same Port
+with a different command.
+
+A sandbox is metered, so nothing keeps one alive by default. Success
+removes it; failure pushes the task branch first so the agent's commits
+survive, then removes it (`sandbox.keep_on_failure` holds it open for
+live debugging). Drain, watchdog kill, total timeout, and `just shep
+kill` all release it too, since the runner's own cleanup dies with the
+process — and a boot sweep reaps what a crash left behind.
 
 `shep:codex` + `shep:sandbox` is rejected up front: no Codex credential
 is forwarded, so it would 401 remotely. The snapshot carries no Elixir,

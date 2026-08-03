@@ -25,6 +25,7 @@ defmodule Shep.Config.Schema do
       "timeout" => "45m",
       "remote_path" => "/vercel/sandbox/app",
       "tag" => "shep=1",
+      "keep_on_failure" => false,
       "github_token_command" => "gh auth token"
     },
     "hooks" => %{
