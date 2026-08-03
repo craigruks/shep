@@ -71,6 +71,7 @@ defmodule Shep.Orchestrator.Dispatch do
       pid: pid,
       ref: ref,
       task: task,
+      model: Shep.AgentRunner.model_for(task, config),
       worktree_path: paused_task.worktree_path,
       session_name: paused_task.session_name,
       started_at: System.monotonic_time(:millisecond),
@@ -116,6 +117,7 @@ defmodule Shep.Orchestrator.Dispatch do
       pid: pid,
       ref: ref,
       task: task,
+      model: Shep.AgentRunner.model_for(task, config),
       started_at: System.monotonic_time(:millisecond),
       last_output_at: System.monotonic_time(:millisecond)
     }

@@ -114,6 +114,7 @@ defmodule Mix.Tasks.Shep.Agent do
       type: task_type,
       depends_on: Shep.Tracker.GitHub.parse_depends_on(issue["body"]),
       agent: Shep.Tracker.GitHub.parse_agent(labels),
+      model: Shep.Tracker.GitHub.parse_model(labels),
       no_merge: Shep.Tracker.GitHub.no_merge?(labels)
     }
   end

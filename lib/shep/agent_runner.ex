@@ -24,6 +24,7 @@ defmodule Shep.AgentRunner do
             "this log stays quiet except gap heartbeats until verify"
         )
 
+        log_model_override(task)
         session = Exec.agent_module(task.agent).session_name(task.id)
 
         send(
@@ -126,7 +127,7 @@ defmodule Shep.AgentRunner do
 
   defp execute_resume_turns(worktree_path, task, orchestrator_pid, max_turns, config) do
     agent_cmd = agent_command(task.agent, config)
-    args = Exec.agent_module(task.agent).build_resume_args(task.id, agent_model(config))
+    args = Exec.agent_module(task.agent).build_resume_args(task.id, model_for(task, config))
     idle_ms = idle_timeout_ms(config)
 
     iteration =
@@ -152,7 +153,7 @@ defmodule Shep.AgentRunner do
   defp execute_turns(prompt, worktree_path, task, orchestrator_pid, max_turns, config) do
     agent_cmd = agent_command(task.agent, config)
     idle_ms = idle_timeout_ms(config)
-    model = agent_model(config)
+    model = model_for(task, config)
 
     do_turns(
       prompt,
@@ -198,9 +199,21 @@ defmodule Shep.AgentRunner do
     get_in(config, ["agent", "idle_timeout_ms"]) || 600_000
   end
 
-  defp agent_model(config) do
-    get_in(config, ["agent", "model"])
-  end
+  @doc """
+  The model a task runs on: its `shep:model:` override, else `agent.model`.
+
+  Codex takes no default: `agent.model` names a Claude model, so an
+  un-overridden Codex task runs on whatever the Codex CLI defaults to.
+  """
+  @spec model_for(Shep.Task.t(), map()) :: String.t() | nil
+  def model_for(%Shep.Task{model: model}, _config) when is_binary(model), do: model
+  def model_for(%Shep.Task{agent: :codex}, _config), do: nil
+  def model_for(_task, config), do: get_in(config, ["agent", "model"])
+
+  defp log_model_override(%Shep.Task{id: id, model: model}) when is_binary(model),
+    do: Logger.info("model override for task #{id}: #{model}")
+
+  defp log_model_override(_task), do: :ok
 
   defp agent_command(:codex, _config), do: "codex"
 
@@ -229,7 +242,7 @@ defmodule Shep.AgentRunner do
   @spec fix_turn(String.t(), String.t(), Shep.Task.t(), map(), pid()) :: Shep.IterationResult.t()
   def fix_turn(prompt, wt, task, config, opid) do
     agent_cmd = agent_command(task.agent, config)
-    args = Shep.AgentRunner.Claude.build_continue_args(prompt, task.id, agent_model(config))
+    args = Shep.AgentRunner.Claude.build_continue_args(prompt, task.id, model_for(task, config))
     run_single_turn_with_args(agent_cmd, args, wt, task, opid, idle_timeout_ms(config))
   end
 

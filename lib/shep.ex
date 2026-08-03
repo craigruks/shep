@@ -11,7 +11,8 @@ defmodule Shep do
       prompt: Map.fetch!(attrs, :prompt),
       prompt_args: Map.get(attrs, :prompt_args, %{}),
       type: Map.get(attrs, :type),
-      depends_on: Map.get(attrs, :depends_on)
+      depends_on: Map.get(attrs, :depends_on),
+      model: Map.get(attrs, :model)
     }
 
     Shep.Orchestrator.submit(task)

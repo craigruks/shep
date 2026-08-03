@@ -24,6 +24,7 @@ defmodule Shep.Orchestrator.SnapshotTest do
       running: %{
         "s1" => %{
           task: task,
+          model: "opus",
           started_at: 111,
           last_output_at: 222,
           worktree_path: "/wt/s1",
@@ -37,11 +38,28 @@ defmodule Shep.Orchestrator.SnapshotTest do
 
     assert %{
              task_type: "custom",
+             agent: :claude,
+             model: "opus",
              started_at: 111,
              last_output_at: 222,
              worktree_path: "/wt/s1",
              session_name: "shep-s1"
            } = snap.running["s1"]
+  end
+
+  test "write projects the resolved model, nil when the entry predates one" do
+    task = %Shep.Task{id: "s1", branch: "b", prompt: "p", agent: :codex, model: "gpt-5-codex"}
+
+    state = %Shep.Orchestrator{
+      running: %{"s1" => %{task: task, model: "gpt-5-codex", started_at: 1, last_output_at: 1}}
+    }
+
+    Snapshot.write(state)
+    assert %{agent: :codex, model: "gpt-5-codex"} = Snapshot.read().running["s1"]
+
+    bare = %Shep.Orchestrator{running: %{"s1" => %{task: task, started_at: 1, last_output_at: 1}}}
+    Snapshot.write(bare)
+    assert %{model: nil} = Snapshot.read().running["s1"]
   end
 
   test "read enriches a running task with non-negative elapsed_ms/idle_ms" do

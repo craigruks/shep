@@ -75,6 +75,7 @@ defmodule Shep.Task do
     :prompt,
     :type,
     :depends_on,
+    :model,
     agent: :claude,
     base_branch: "staging",
     prompt_args: %{},
@@ -93,6 +94,7 @@ defmodule Shep.Task do
           type: String.t() | nil,
           depends_on: [String.t()] | nil,
           agent: agent(),
+          model: String.t() | nil,
           no_merge: boolean(),
           demo: boolean()
         }
