@@ -67,9 +67,10 @@ defmodule Shep.Orchestrator do
   def terminate(reason, state) do
     Logger.info("Orchestrator shutting down: #{inspect(reason)}")
 
-    for {task_id, %{pid: pid}} <- state.running do
+    for {task_id, %{pid: pid, task: task}} <- state.running do
       Logger.info("Draining agent: #{task_id}")
       Process.exit(pid, :shutdown)
+      Shep.Sandbox.release(task)
     end
 
     :ok
@@ -95,10 +96,11 @@ defmodule Shep.Orchestrator do
       %{pid: pid} = entry ->
         Poller.cancel_watchdog(entry)
         Process.exit(pid, :kill)
+        Shep.Sandbox.release(entry.task)
         running = Map.delete(state.running, task_id)
         state = Dispatch.clean_retry(task_id, %{state | running: running})
         Snapshot.write(state)
-        Logger.info("Killed task #{task_id} (no retry, worktree preserved)")
+        Logger.info("Killed task #{task_id} (no retry, local worktree preserved)")
         {:reply, :ok, state}
     end
   end

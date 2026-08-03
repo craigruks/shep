@@ -15,11 +15,12 @@ defmodule Shep.Sandbox do
   require Logger
 
   @cli "sandbox"
+  @name_prefix "shep-"
 
   @doc "The sandbox name for a task. Deterministic, so resume finds it."
   @spec name(Shep.Task.t()) :: String.t()
   def name(%Shep.Task{id: id}) do
-    "shep-" <> String.replace(to_string(id), ~r/[^a-zA-Z0-9_-]/, "-")
+    @name_prefix <> String.replace(to_string(id), ~r/[^a-zA-Z0-9_-]/, "-")
   end
 
   @doc "Whether a sandbox with this name is currently alive."
@@ -103,6 +104,67 @@ defmodule Shep.Sandbox do
   def rm(sandbox) when is_binary(sandbox) do
     _ = run(["rm", sandbox])
     :ok
+  end
+
+  @doc """
+  Release the sandbox behind a task, if it has one.
+
+  The run loop's own cleanup only happens when the runner finishes. Every
+  path that ends a task by killing that process — drain, watchdog, total
+  timeout, `just shep kill` — has to release the sandbox itself, or it
+  bills until its timeout.
+  """
+  @spec release(Shep.Task.t()) :: :ok
+  def release(%Shep.Task{location: :vercel} = task) do
+    sandbox = name(task)
+    Logger.info("Releasing sandbox #{sandbox}")
+    rm(sandbox)
+  end
+
+  def release(%Shep.Task{}), do: :ok
+
+  @doc """
+  Remove every *running* sandbox this daemon could have created, except
+  those named in `keep`.
+
+  Catches what a crash or a hard reboot left behind, the way worktree
+  reconciliation does at boot. Scoped by both the configured tag and the
+  `shep-` name prefix; a second daemon sharing the account needs its own
+  `sandbox.tag`. Stopped sandboxes are not billed, so they are left alone.
+  """
+  @spec sweep(map(), [String.t()]) :: {:ok, [String.t()]} | {:error, String.t()}
+  def sweep(config, keep \\ []) do
+    case capture(["ls", "--tag", tag(config), "--name-prefix", @name_prefix]) do
+      {:ok, out} ->
+        orphans = out |> orphan_names(keep)
+
+        Enum.each(orphans, fn sandbox ->
+          Logger.info("Reaping orphaned sandbox: #{sandbox}")
+          rm(sandbox)
+        end)
+
+        {:ok, orphans}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  Sandbox names in `sandbox ls` output, minus the ones to keep.
+
+  Split from `sweep/2` so the parse is testable without a live account:
+  the table's header and progress chatter drop out because neither starts
+  with the name prefix.
+  """
+  @spec orphan_names(String.t(), [String.t()]) :: [String.t()]
+  def orphan_names(ls_output, keep \\ []) when is_binary(ls_output) do
+    ls_output
+    |> String.split("\n", trim: true)
+    |> Enum.map(&(&1 |> String.split(~r/\s+/, trim: true) |> List.first()))
+    |> Enum.filter(&(is_binary(&1) and String.starts_with?(&1, @name_prefix)))
+    |> Enum.reject(&(&1 in keep))
+    |> Enum.uniq()
   end
 
   @doc "The remote checkout path."
