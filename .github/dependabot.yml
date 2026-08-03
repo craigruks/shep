@@ -1,11 +1,17 @@
 version: 2
+
+# `main` is release-only: it advances through the staging→main promotion PR
+# and nothing else. Dependabot defaults to the default branch, so without
+# target-branch every bump would open a PR that bypasses that gate.
 updates:
   - package-ecosystem: "mix"
     directory: "/"
+    target-branch: "staging"
     schedule:
       interval: "weekly"
 
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "staging"
     schedule:
       interval: "weekly"
