@@ -32,6 +32,7 @@ defmodule Mix.Tasks.Shep.Status do
          %{
            type: info[:task_type] || "custom",
            agent: info[:agent] || :claude,
+           location: info[:location] || :local,
            model: info[:model],
            elapsed_ms: info[:elapsed_ms],
            idle_ms: info[:idle_ms]

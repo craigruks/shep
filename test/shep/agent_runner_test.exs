@@ -90,7 +90,7 @@ defmodule Shep.AgentRunnerModelTest do
   defp argv_after_fix_turn(dir, task, config_model) do
     agent = recording_agent(dir)
     config = %{"agent" => %{"command" => agent, "model" => config_model}}
-    Shep.AgentRunner.fix_turn("go", dir, task, config, self())
+    Shep.AgentRunner.fix_turn("go", Shep.Workspace.local(dir), task, config, self())
     dir |> Path.join("argv.txt") |> File.read!() |> String.split("\n", trim: true)
   end
 

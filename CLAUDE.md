@@ -132,6 +132,23 @@ model names are logged and ignored, falling back to `agent.model`.
 Codex honours `shep:model:` too, but never inherits `agent.model`
 (that names a Claude model); an un-overridden Codex task runs on the
 Codex CLI's own default.
+
+## Execution Location
+
+Orthogonal to *what* runs: *where* it runs. `agent.location` picks the
+fleet default (`local`, the git worktree); a `shep:sandbox` label runs
+that issue in a Vercel sandbox instead — provisioned from
+`sandbox.snapshot`, cloned over https with a token from
+`sandbox.github_token_command`, torn down on success and kept on
+failure. `Shep.Workspace` is the whole boundary: prepare, run the agent,
+run a shell command, run git, clean up. `Shep.AgentRunner.Exec` is
+location-blind, because `sandbox exec` streams line by line and
+propagates exit codes — a remote turn is the same Port with a different
+command.
+
+`shep:codex` + `shep:sandbox` is rejected up front: no Codex credential
+is forwarded, so it would 401 remotely. The snapshot carries no Elixir,
+so this repo's own `goal.verify` cannot run in a sandbox yet.
 Agent-specific modules: `AgentRunner.Claude`, `AgentRunner.Codex`.
 Claude sessions use `--name "shep-{id}"` for persistence.
 

@@ -26,11 +26,12 @@ defmodule Shep.Goal do
   through `run_turn` and re-verifies, up to `goal.verify_fixes` attempts.
   Returns the (possibly downgraded) completion.
   """
-  @spec verify_loop(struct(), Shep.Task.t(), String.t(), map(), pid(), run_turn()) :: struct()
+  @spec verify_loop(struct(), Shep.Task.t(), Shep.Workspace.t(), map(), pid(), run_turn()) ::
+          struct()
   def verify_loop(
         %Shep.Completion.Complete{} = final,
         %{demo: false, agent: :claude} = task,
-        worktree_path,
+        workspace,
         config,
         orchestrator_pid,
         run_turn
@@ -45,7 +46,7 @@ defmodule Shep.Goal do
         do_verify(
           final,
           task,
-          worktree_path,
+          workspace,
           config,
           orchestrator_pid,
           verify_cmd,
@@ -58,10 +59,10 @@ defmodule Shep.Goal do
 
   def verify_loop(final, _task, _path, _config, _pid, _run_turn), do: final
 
-  defp do_verify(final, task, wt, config, opid, verify_cmd, attempt, max, run_turn) do
+  defp do_verify(final, task, ws, config, opid, verify_cmd, attempt, max, run_turn) do
     send(opid, {:agent_output, task.id, "[goal] running verify (attempt #{attempt + 1})"})
 
-    case run_verify(verify_cmd, wt) do
+    case run_verify(verify_cmd, ws) do
       {:ok, _out} ->
         Logger.info("Verify passed for task #{task.id}")
         final
@@ -76,7 +77,7 @@ defmodule Shep.Goal do
             failed
 
           _ ->
-            do_verify(final, task, wt, config, opid, verify_cmd, attempt + 1, max, run_turn)
+            do_verify(final, task, ws, config, opid, verify_cmd, attempt + 1, max, run_turn)
         end
 
       {:error, out} ->
@@ -93,21 +94,28 @@ defmodule Shep.Goal do
   up to `goal.ci_fixes` attempts (Claude only). Returns the completion,
   downgraded to `Failed` if the goal is not reached.
   """
-  @spec ci_loop(struct(), String.t(), Shep.Task.t(), String.t(), map(), pid(), run_turn()) ::
-          struct()
-  def ci_loop(final, _pr_url, %{no_merge: true} = task, _wt, _config, _pid, _run_turn) do
+  @spec ci_loop(
+          struct(),
+          String.t(),
+          Shep.Task.t(),
+          Shep.Workspace.t(),
+          map(),
+          pid(),
+          run_turn()
+        ) :: struct()
+  def ci_loop(final, _pr_url, %{no_merge: true} = task, _ws, _config, _pid, _run_turn) do
     Logger.info("Skipping CI watch for task #{task.id} (no-merge)")
     final
   end
 
-  def ci_loop(final, pr_url, task, wt, config, opid, run_turn) do
+  def ci_loop(final, pr_url, task, ws, config, opid, run_turn) do
     repo = get_in(config, ["tracker", "repo"])
     pr_number = pr_url |> String.split("/") |> List.last()
     max = get_in(config, ["goal", "ci_fixes"]) || 2
-    do_ci(final, repo, pr_number, task, wt, config, opid, 0, max, run_turn)
+    do_ci(final, repo, pr_number, task, ws, config, opid, 0, max, run_turn)
   end
 
-  defp do_ci(final, repo, pr, task, wt, config, opid, attempt, max, run_turn) do
+  defp do_ci(final, repo, pr, task, ws, config, opid, attempt, max, run_turn) do
     case Shep.CIWatch.watch(repo, pr, max_retries: 1) do
       :passed ->
         Logger.info("CI passed for task #{task.id}")
@@ -120,9 +128,9 @@ defmodule Shep.Goal do
         prompt = fix_prompt(:ci, attempt + 1, max, logs, nil)
         _iteration = run_turn.(prompt)
 
-        case Shep.AgentRunner.PR.push_branch(task, wt) do
+        case Shep.AgentRunner.PR.push_branch(task, ws) do
           :ok ->
-            do_ci(final, repo, pr, task, wt, config, opid, attempt + 1, max, run_turn)
+            do_ci(final, repo, pr, task, ws, config, opid, attempt + 1, max, run_turn)
 
           {:error, push_err} ->
             give_up(task, "push failed during CI fix: #{tail(push_err, 300)}")
@@ -141,13 +149,10 @@ defmodule Shep.Goal do
     %Shep.Completion.Failed{reason: reason, recoverable: false}
   end
 
-  @doc "Run the verify command in the worktree. Returns output either way."
-  @spec run_verify(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  def run_verify(cmd, cwd) when is_binary(cmd) and is_binary(cwd) do
-    case System.cmd("/bin/sh", ["-c", cmd], cd: cwd, stderr_to_stdout: true) do
-      {out, 0} -> {:ok, out}
-      {out, _code} -> {:error, out}
-    end
+  @doc "Run the verify command in the task's workspace. Returns output either way."
+  @spec run_verify(String.t(), Shep.Workspace.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def run_verify(cmd, %Shep.Workspace{} = workspace) when is_binary(cmd) do
+    Shep.Workspace.shell(workspace, cmd)
   end
 
   @doc "Last `bytes` of a string, for feeding logs to a fix turn."
