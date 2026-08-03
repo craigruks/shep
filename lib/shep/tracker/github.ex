@@ -14,6 +14,11 @@ defmodule Shep.Tracker.GitHub do
   @label_promoted "shep:promoted"
   @label_no_merge "shep:no-merge"
   @label_codex "shep:codex"
+  @label_model "shep:model:"
+
+  # Model names and ids only: aliases (`opus`), pinned ids
+  # (`claude-opus-5-20251101`), and bracketed variants (`claude-opus-5[1m]`).
+  @model_pattern ~r/^[A-Za-z0-9][A-Za-z0-9._\-\[\]]*$/
 
   @status_labels %{
     "in-progress" => @label_in_progress,
@@ -149,6 +154,29 @@ defmodule Shep.Tracker.GitHub do
        else: :claude
   end
 
+  @doc """
+  Parse a per-issue model override from labels (`shep:model:sonnet`).
+
+  Returns nil when the label is absent or its value is not a plausible
+  model name, in which case the task falls back to `agent.model`.
+  """
+  @spec parse_model([map()]) :: String.t() | nil
+  def parse_model(labels) when is_list(labels) do
+    Enum.find_value(labels, fn
+      %{"name" => @label_model <> value} -> valid_model(value)
+      _ -> nil
+    end)
+  end
+
+  defp valid_model(value) do
+    if Regex.match?(@model_pattern, value) do
+      value
+    else
+      Logger.warning("ignoring malformed #{@label_model} label value: #{inspect(value)}")
+      nil
+    end
+  end
+
   defp issue_to_task(issue, base_branch) do
     number = to_string(issue["number"])
     labels = issue["labels"] || []
@@ -169,6 +197,7 @@ defmodule Shep.Tracker.GitHub do
       type: task_type,
       depends_on: depends_on,
       agent: parse_agent(labels),
+      model: parse_model(labels),
       no_merge: no_merge?(labels)
     }
   end

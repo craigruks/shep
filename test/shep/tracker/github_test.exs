@@ -45,6 +45,42 @@ defmodule Shep.Tracker.GitHubTest do
     end
   end
 
+  describe "parse_model/1" do
+    test "extracts an alias from a shep:model label" do
+      labels = [%{"name" => "shep"}, %{"name" => "shep:model:sonnet"}]
+      assert "sonnet" == GitHub.parse_model(labels)
+    end
+
+    test "extracts a pinned model id" do
+      labels = [%{"name" => "shep:model:claude-opus-5-20251101"}]
+      assert "claude-opus-5-20251101" == GitHub.parse_model(labels)
+    end
+
+    test "extracts a bracketed variant id" do
+      labels = [%{"name" => "shep:model:claude-opus-5[1m]"}]
+      assert "claude-opus-5[1m]" == GitHub.parse_model(labels)
+    end
+
+    test "returns nil when no model label" do
+      assert nil == GitHub.parse_model([%{"name" => "shep"}, %{"name" => "type:lint-fix"}])
+      assert nil == GitHub.parse_model([])
+    end
+
+    test "an unprefixed model label is ignored" do
+      assert nil == GitHub.parse_model([%{"name" => "model:sonnet"}])
+    end
+
+    test "a malformed value falls back to the configured model" do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert nil == GitHub.parse_model([%{"name" => "shep:model:rm -rf /"}])
+          assert nil == GitHub.parse_model([%{"name" => "shep:model:"}])
+        end)
+
+      assert log =~ "ignoring malformed"
+    end
+  end
+
   describe "parse_depends_on/1" do
     test "parses single dependency" do
       body = "Fix the bug\n\nDepends on: #42"

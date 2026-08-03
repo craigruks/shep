@@ -31,6 +31,8 @@ defmodule Mix.Tasks.Shep.Status do
         {id,
          %{
            type: info[:task_type] || "custom",
+           agent: info[:agent] || :claude,
+           model: info[:model],
            elapsed_ms: info[:elapsed_ms],
            idle_ms: info[:idle_ms]
          }}
