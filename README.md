@@ -144,6 +144,8 @@ for l in shep shep:in-progress shep:pr-created shep:in-review shep:failed \
          shep:promoted shep:no-merge shep:codex; do
   gh label create "$l" --repo you/your-repo 2>/dev/null || true
 done
+# Optional: per-issue model overrides. Create one label per model you want
+# to reach for, e.g. gh label create shep:model:sonnet --repo you/your-repo
 
 # 3. Label an issue "shep" and release the hound
 just shep up          # or: just shep wake
@@ -175,6 +177,10 @@ goal:      { verify: "mix quality", verify_fixes: 2, ci_fixes: 2 }
 hooks:     { on_worktree_ready: "pnpm install --frozen-lockfile" }
 staging:   { base_branch: "staging", pr_target: "staging" }
 ```
+
+`agent.model` is the fleet default; a `shep:model:<name>` label on an issue
+beats it for that issue alone, and `just shep ps` reports the agent and model
+each running task is on.
 
 ## Herded by Shep
 
@@ -252,6 +258,7 @@ labels and logs.
 | `shep:failed` | goal not reached after capped fix attempts; reason posted as a comment |
 | `shep:promoted` | shipped |
 | `shep:codex` | route this issue to Codex instead of Claude |
+| `shep:model:<name>` | run this issue on a specific model, overriding `agent.model` (works for Codex too) |
 | `shep:no-merge` | open the PR but skip CI-watch / auto-merge labels |
 
 Dependencies work too: put `Depends on: #12, #45` in an issue body and Shep

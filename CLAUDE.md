@@ -120,10 +120,18 @@ is convention plus the rule that `main` accepts no direct pushes.
 
 ## Agent Selection
 
-`agent.model` in WORKFLOW.md picks the Claude model (default "opus",
-the latest Opus alias; pin an exact id to freeze it). Hot-reloaded like
-all config.
+`agent.model` in WORKFLOW.md picks the default Claude model (default
+"opus", the latest Opus alias; pin an exact id to freeze it).
+Hot-reloaded like all config.
+A `shep:model:<name>` label on an issue overrides it for that issue
+alone (`shep:model:sonnet`, `shep:model:claude-opus-5-20251101`) — the
+override rides the task through fix turns and resumes, and `just shep ps`
+reports the model each running task is on. Values that aren't plausible
+model names are logged and ignored, falling back to `agent.model`.
 `shep:codex` label on GitHub issue → Codex CLI instead of Claude.
+Codex honours `shep:model:` too, but never inherits `agent.model`
+(that names a Claude model); an un-overridden Codex task runs on the
+Codex CLI's own default.
 Agent-specific modules: `AgentRunner.Claude`, `AgentRunner.Codex`.
 Claude sessions use `--name "shep-{id}"` for persistence.
 

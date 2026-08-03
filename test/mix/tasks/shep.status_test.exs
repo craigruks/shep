@@ -13,8 +13,28 @@ defmodule Mix.Tasks.Shep.StatusTest do
 
     out = Status.project(snapshot)
 
-    assert out.running["s1"] == %{type: "custom", elapsed_ms: 1234, idle_ms: 42}
+    assert out.running["s1"] == %{
+             type: "custom",
+             agent: :claude,
+             model: nil,
+             elapsed_ms: 1234,
+             idle_ms: 42
+           }
+
     assert out.running_count == 1
+  end
+
+  test "project reports the agent and the model a task is running on" do
+    snapshot = %{
+      running: %{"s1" => %{task_type: "custom", agent: :codex, model: "gpt-5-codex"}},
+      paused: %{},
+      claimed: []
+    }
+
+    entry = Status.project(snapshot).running["s1"]
+
+    assert entry.agent == :codex
+    assert entry.model == "gpt-5-codex"
   end
 
   test "project never subtracts monotonic time, so it cannot invent a negative delta" do
