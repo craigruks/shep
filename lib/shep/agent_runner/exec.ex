@@ -10,6 +10,14 @@ defmodule Shep.AgentRunner.Exec do
 
   @max_line_length 65_536
 
+  # The BEAM hands a spawned port an stdin pipe it holds open forever.
+  # A CLI that reads stdin when it is not a TTY (Codex does) then blocks
+  # on an EOF that never comes. Spawning through `sh -c` lets us redirect
+  # stdin from /dev/null; `exec` replaces the shell, so the port's os_pid
+  # and exit status are the agent's own, not a wrapper's.
+  @shell "/bin/sh"
+  @exec_with_closed_stdin ~S|exec "$0" "$@" </dev/null|
+
   @doc "Resolve an agent command: bare names via PATH, paths relative to cwd."
   @spec resolve_executable(String.t()) :: String.t() | nil
   def resolve_executable(cmd) do
@@ -43,13 +51,13 @@ defmodule Shep.AgentRunner.Exec do
     started_at = System.monotonic_time(:millisecond)
 
     port =
-      Port.open({:spawn_executable, exe}, [
+      Port.open({:spawn_executable, @shell}, [
         :binary,
         :exit_status,
         {:line, @max_line_length},
         :stderr_to_stdout,
         {:cd, cwd},
-        {:args, args}
+        {:args, ["-c", @exec_with_closed_stdin, exe | args]}
       ])
 
     {stdout, exit_code} = collect_output(port, task.id, orchestrator_pid, idle_ms)
