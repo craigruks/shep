@@ -44,12 +44,18 @@ defmodule Shep.Hooks do
     end
   end
 
-  @doc "Run all configured hooks for a lifecycle event."
-  @spec run_lifecycle(map(), String.t(), String.t()) :: :ok
+  @doc """
+  Run the configured hook for a lifecycle event.
+
+  Propagates `run/3`'s verdict: an unconfigured hook is `:ok`, a hook that
+  exits non-zero or times out is an `{:error, reason}` the caller can gate
+  on. A hook is a precondition, not a notification — swallowing its failure
+  hands the agent a checkout the hook was supposed to have made usable.
+  """
+  @spec run_lifecycle(map(), String.t(), String.t()) :: :ok | {:error, String.t()}
   def run_lifecycle(config, event, cwd) when is_binary(event) and is_binary(cwd) do
     command = get_in(config, ["hooks", event])
     timeout = get_in(config, ["hooks", "hook_timeout_ms"]) || 120_000
     run(command, cwd, timeout: timeout, name: event)
-    :ok
   end
 end
