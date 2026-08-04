@@ -116,6 +116,16 @@ One `Task.Supervisor` child per issue. Each agent gets:
    Attempts are capped; exhaustion means `shep:failed`, a preserved
    worktree, and a Slack ping.
 
+   Green means a check actually reported, never "nothing is failing":
+   GitHub builds no check suites for a PR it cannot merge, so a
+   conflicting PR shows zero failures forever. Shep reads mergeability
+   on every poll and sends a conflict back to the session as a fix turn
+   (merge the base, resolve, re-push), and a PR on which nothing reports
+   within `goal.ci_grace_ms` fails as unverified instead of being labelled
+   `shep:in-review`. Skipped and queued third-party checks are not
+   evidence. Set `goal.ci_required_checks: [quality, release-smoke]` to
+   demand named checks rather than any check at all.
+
 Supervision tree (the whole thing):
 
 ```
@@ -177,7 +187,7 @@ tracker:   { kind: "github", repo: "you/your-repo" }
 workspace: { root: ~/code/shep_worktrees }
 agent:     { command: "claude", model: "opus", max_concurrent: 3, max_turns: 10 }
 sandbox:   { snapshot: "snap_…", timeout: "45m" }   # see "Running agents in a sandbox"
-goal:      { verify: "mix quality", verify_fixes: 2, ci_fixes: 2 }
+goal:      { verify: "mix quality", verify_fixes: 2, ci_fixes: 2, ci_grace_ms: 300000 }
 hooks:     { on_worktree_ready: "pnpm install --frozen-lockfile" }
 staging:   { base_branch: "staging", pr_target: "staging" }
 ```
