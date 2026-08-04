@@ -3,20 +3,36 @@ defmodule Shep.Worktree do
 
   require Logger
 
-  @doc "Create a worktree for the given branch, branching from base_branch. `repo` is the git repo to cut from."
+  @doc """
+  Create a worktree for the given branch, branching from base_branch.
+  `repo` is the git repo to cut from.
+
+  `base_branch` is refreshed from the remote first (see
+  `Shep.Worktree.BaseRef`), and a failed fetch aborts before any stale
+  state is cleaned up — nothing is destroyed for a cut that will not
+  happen.
+  """
   @spec create(String.t(), String.t(), String.t(), String.t()) ::
           {:ok, String.t()} | {:error, String.t()}
   def create(branch, base_branch, root, repo \\ ".")
       when is_binary(branch) and is_binary(base_branch) do
     path = path_for(branch, root)
 
-    cleanup_stale(branch, path, repo)
+    with {:ok, base} <- Shep.Worktree.BaseRef.resolve(repo, base_branch) do
+      cleanup_stale(branch, path, repo)
+      add(branch, base, path, repo)
+    end
+  end
 
-    case System.cmd("git", ["-C", repo, "worktree", "add", "-b", branch, path, base_branch],
-           stderr_to_stdout: true
-         ) do
+  # --no-track: cutting from `origin/<base>` would otherwise set the task
+  # branch's upstream to the base branch, so every `git status` the agent
+  # runs would report it "behind origin/<base>".
+  defp add(branch, base, path, repo) do
+    args = ["-C", repo, "worktree", "add", "--no-track", "-b", branch, path, base]
+
+    case System.cmd("git", args, stderr_to_stdout: true) do
       {_output, 0} ->
-        Logger.info("Created worktree at #{path}")
+        Logger.info("Created worktree at #{path} from #{base}")
         {:ok, path}
 
       {output, _code} ->

@@ -305,6 +305,15 @@ SHEP_WORKFLOW=.shep/WORKFLOW.thatrepo.md just shep up
 
 One dog, many flocks. The tracked `WORKFLOW.md` stays a placeholder.
 
+That clone is long-lived and nothing else refreshes it, so Shep fetches
+`staging.base_branch` from `origin` before every cut and branches from the
+remote-tracking ref — never from the clone's local copy of it. The fetch is
+serialized per repo path, so two dispatches in the same tick cannot lose a
+race on git's ref locks and leave one agent on a stale base. A fetch that
+fails fails the dispatch (retryable) rather than shipping an old base
+silently; a base branch that tracks no remote — the demo's — is used as
+given.
+
 ## Commands (speak dog)
 
 One dispatcher: `just shep <command> [id]`. Every command has a proper name
