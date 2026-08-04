@@ -61,6 +61,8 @@ defmodule Shep.AgentRunner.Exec do
         {:args, ["-c", @exec_with_closed_stdin, exe | args]}
       ])
 
+    report_os_pid(port, task.id, orchestrator_pid)
+
     {stdout, exit_code} = collect_output(port, task.id, orchestrator_pid, idle_ms)
     duration = System.monotonic_time(:millisecond) - started_at
 
@@ -122,12 +124,67 @@ defmodule Shep.AgentRunner.Exec do
   end
 
   # Port.info/2 returns nil once the port is closed, so the pid is
-  # captured before Port.close/1. SIGKILL is best-effort: the process
-  # may already be gone.
-  defp kill_os_pid({:os_pid, os_pid}) do
-    System.cmd("kill", ["-9", Integer.to_string(os_pid)], stderr_to_stdout: true)
+  # captured before Port.close/1.
+  defp kill_os_pid({:os_pid, os_pid}), do: terminate(os_pid)
+  defp kill_os_pid(nil), do: :ok
+
+  # The Port's os_pid is the agent itself: `Exec.run/6` spawns through
+  # `sh -c 'exec …'`, so the shell is replaced rather than left wrapping.
+  defp report_os_pid(port, task_id, orchestrator_pid) do
+    case Port.info(port, :os_pid) do
+      {:os_pid, os_pid} -> send(orchestrator_pid, {:agent_meta, task_id, %{os_pid: os_pid}})
+      _ -> :ok
+    end
+  end
+
+  @doc """
+  Stop an agent's OS process: SIGTERM, then SIGKILL if it does not go.
+
+  Killing the Elixir Task does *not* stop the agent — closing a Port
+  closes pipes, it does not signal the child, and an agent spawned with
+  stdin at EOF never notices. So every path that ends a task early has to
+  come through here, or the agent keeps working in a worktree its
+  operator was just told was theirs.
+
+  Best effort and idempotent: a process that is already gone is fine.
+  """
+  @spec terminate(non_neg_integer() | nil, non_neg_integer()) :: :ok
+  def terminate(os_pid, grace_ms \\ 2_000)
+  def terminate(nil, _grace_ms), do: :ok
+
+  def terminate(os_pid, grace_ms) when is_integer(os_pid) do
+    pid = Integer.to_string(os_pid)
+    _ = System.cmd("kill", ["-TERM", pid], stderr_to_stdout: true)
+
+    unless await_exit(pid, grace_ms) do
+      _ = System.cmd("kill", ["-9", pid], stderr_to_stdout: true)
+      _ = await_exit(pid, grace_ms)
+    end
+
     :ok
   end
 
-  defp kill_os_pid(nil), do: :ok
+  @doc "Whether an OS process is gone. Public so callers can confirm a kill."
+  @spec gone?(non_neg_integer() | nil) :: boolean()
+  def gone?(nil), do: true
+
+  def gone?(os_pid) when is_integer(os_pid) do
+    match?(
+      {_, code} when code != 0,
+      System.cmd("kill", ["-0", Integer.to_string(os_pid)], stderr_to_stdout: true)
+    )
+  end
+
+  defp await_exit(_pid, remaining) when remaining <= 0, do: false
+
+  defp await_exit(pid, remaining) do
+    case System.cmd("kill", ["-0", pid], stderr_to_stdout: true) do
+      {_, 0} ->
+        Process.sleep(50)
+        await_exit(pid, remaining - 50)
+
+      _ ->
+        true
+    end
+  end
 end
