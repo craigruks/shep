@@ -12,90 +12,12 @@ defmodule Shep.AgentRunner do
     Logger.metadata(task_id: task.id, task_type: task.type)
     started_at = System.monotonic_time(:millisecond)
     config = opts[:config] || Shep.Config.current!()
-    max_turns = get_in(config, ["agent", "max_turns"]) || 10
 
     :telemetry.execute([:shep, :agent, :start], %{}, %{task_id: task.id, task_type: task.type})
 
     case resolve_workspace(task, opts, config) do
       {:ok, workspace, resuming?} ->
-        where = Workspace.describe(workspace)
-        Logger.info("Workspace ready for task #{task.id}: #{where}")
-
-        Logger.info(
-          "agent phase: streaming to .shep/runs/#{task.id}.stdout.log; " <>
-            "this log stays quiet except gap heartbeats until verify"
-        )
-
-        log_model_override(task)
-        session = Exec.agent_module(task.agent).session_name(task.id)
-
-        send(
-          orchestrator_pid,
-          {:agent_meta, task.id, %{worktree_path: where, session_name: session}}
-        )
-
-        unless resuming?, do: Workspace.run_hook(workspace, config, "on_worktree_ready")
-
-        iterations =
-          if resuming? do
-            execute_resume_turns(workspace, task, orchestrator_pid, max_turns, config)
-          else
-            prompt =
-              Shep.PromptBuilder.build_expanded(task, Workspace.prompt_cwd(workspace, config))
-
-            execute_turns(prompt, workspace, task, orchestrator_pid, max_turns, config)
-          end
-
-        final = resolve_completion(iterations)
-        run_turn = fn prompt -> fix_turn(prompt, workspace, task, config, orchestrator_pid) end
-
-        final =
-          Shep.Goal.verify_loop(final, task, workspace, config, orchestrator_pid, run_turn)
-
-        {final, pr_url} =
-          case Shep.AgentRunner.PR.create(final, task, workspace, config) do
-            {:ok, url} ->
-              {Shep.Goal.ci_loop(
-                 final,
-                 url,
-                 task,
-                 workspace,
-                 config,
-                 orchestrator_pid,
-                 run_turn
-               ), url}
-
-            :none ->
-              {final, nil}
-
-            {:error, reason} ->
-              Logger.error("Push or PR creation failed for task #{task.id}: #{reason}")
-
-              {%Shep.Completion.Failed{
-                 reason: "push/PR failed: #{Shep.Goal.tail(reason, 300)}",
-                 recoverable: false
-               }, nil}
-          end
-
-        Workspace.cleanup(workspace, task, final, config)
-        duration = System.monotonic_time(:millisecond) - started_at
-
-        result = %Shep.RunResult{
-          iterations: iterations,
-          completion: final,
-          branch_name: task.branch,
-          worktree_path: where,
-          duration_ms: duration,
-          pr_url: pr_url
-        }
-
-        :telemetry.execute(
-          [:shep, :agent, :stop],
-          %{duration_ms: duration},
-          %{task_id: task.id, completion: final}
-        )
-
-        result
+        run_in_workspace(workspace, resuming?, task, orchestrator_pid, config, started_at)
 
       {:error, reason} ->
         duration = System.monotonic_time(:millisecond) - started_at
@@ -108,6 +30,108 @@ defmodule Shep.AgentRunner do
           duration_ms: duration
         }
     end
+  end
+
+  defp run_in_workspace(workspace, resuming?, task, orchestrator_pid, config, started_at) do
+    where = Workspace.describe(workspace)
+    Logger.info("Workspace ready for task #{task.id}: #{where}")
+
+    Logger.info(
+      "agent phase: streaming to .shep/runs/#{task.id}.stdout.log; " <>
+        "this log stays quiet except gap heartbeats until verify"
+    )
+
+    log_model_override(task)
+    session = Exec.agent_module(task.agent).session_name(task.id)
+
+    send(orchestrator_pid, {:agent_meta, task.id, %{worktree_path: where, session_name: session}})
+
+    case ready_hook(workspace, config, resuming?) do
+      :ok -> execute(workspace, resuming?, task, orchestrator_pid, config, started_at, where)
+      {:error, reason} -> hook_failed(workspace, task, config, reason, started_at, where)
+    end
+  end
+
+  defp ready_hook(_workspace, _config, true), do: :ok
+
+  defp ready_hook(workspace, config, false),
+    do: Workspace.run_hook(workspace, config, "on_worktree_ready")
+
+  # A broken `on_worktree_ready` — dead network, OOM install, lost fetch
+  # race — leaves a checkout the agent cannot work in. Fail before the
+  # first turn instead of briefing an agent into it: no model call has
+  # happened yet, so the retry costs nothing, and the failure names the
+  # layer that actually broke. Recoverable, because this class is
+  # overwhelmingly transient.
+  defp hook_failed(workspace, task, config, reason, started_at, where) do
+    Logger.error("on_worktree_ready failed for task #{task.id}, not starting the agent: #{reason}")
+
+    final = %Shep.Completion.Failed{
+      reason: "on_worktree_ready hook failed: #{reason}",
+      recoverable: true
+    }
+
+    Workspace.cleanup(workspace, task, final, config)
+    finish(task, [], final, nil, where, started_at)
+  end
+
+  defp execute(workspace, resuming?, task, orchestrator_pid, config, started_at, where) do
+    max_turns = get_in(config, ["agent", "max_turns"]) || 10
+
+    iterations =
+      if resuming? do
+        execute_resume_turns(workspace, task, orchestrator_pid, max_turns, config)
+      else
+        prompt = Shep.PromptBuilder.build_expanded(task, Workspace.prompt_cwd(workspace, config))
+
+        execute_turns(prompt, workspace, task, orchestrator_pid, max_turns, config)
+      end
+
+    final = resolve_completion(iterations)
+    run_turn = fn prompt -> fix_turn(prompt, workspace, task, config, orchestrator_pid) end
+
+    final = Shep.Goal.verify_loop(final, task, workspace, config, orchestrator_pid, run_turn)
+
+    {final, pr_url} =
+      case Shep.AgentRunner.PR.create(final, task, workspace, config) do
+        {:ok, url} ->
+          {Shep.Goal.ci_loop(final, url, task, workspace, config, orchestrator_pid, run_turn), url}
+
+        :none ->
+          {final, nil}
+
+        {:error, reason} ->
+          Logger.error("Push or PR creation failed for task #{task.id}: #{reason}")
+
+          {%Shep.Completion.Failed{
+             reason: "push/PR failed: #{Shep.Goal.tail(reason, 300)}",
+             recoverable: false
+           }, nil}
+      end
+
+    Workspace.cleanup(workspace, task, final, config)
+    finish(task, iterations, final, pr_url, where, started_at)
+  end
+
+  defp finish(task, iterations, final, pr_url, where, started_at) do
+    duration = System.monotonic_time(:millisecond) - started_at
+
+    result = %Shep.RunResult{
+      iterations: iterations,
+      completion: final,
+      branch_name: task.branch,
+      worktree_path: where,
+      duration_ms: duration,
+      pr_url: pr_url
+    }
+
+    :telemetry.execute(
+      [:shep, :agent, :stop],
+      %{duration_ms: duration},
+      %{task_id: task.id, completion: final}
+    )
+
+    result
   end
 
   defp resolve_workspace(task, %{resume_worktree: path}, config) when is_binary(path) do

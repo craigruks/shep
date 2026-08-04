@@ -11,7 +11,9 @@ defmodule Shep.Config.Schema do
     "goal" => %{
       "verify" => nil,
       "verify_fixes" => 2,
-      "ci_fixes" => 2
+      "ci_fixes" => 2,
+      "ci_grace_ms" => 300_000,
+      "ci_required_checks" => []
     },
     "agent" => %{
       "command" => "claude",

@@ -11,7 +11,7 @@ defmodule Shep.CIWatchStub do
   @behaviour Shep.CIWatch
 
   @doc "Install the stub as the CI watch adapter with scripted verdicts."
-  @spec install([:passed | {:failed, String.t()}], String.t()) :: :ok
+  @spec install([Shep.CIWatch.verdict()], String.t()) :: :ok
   def install(verdicts, failure_logs \\ "canned failure logs") when is_list(verdicts) do
     uninstall()
 

@@ -79,16 +79,18 @@ defmodule Mix.Tasks.Shep.Demo do
     %Shep.Task{
       id: "demo-#{n}",
       branch: "shep/demo-#{n}",
-      base_branch: current_branch(),
+      base_branch: current_commit(),
       prompt: "Demonstrate the orchestration loop.",
       demo: true
     }
   end
 
-  defp current_branch do
-    case System.cmd("git", ["rev-parse", "--abbrev-ref", "HEAD"], stderr_to_stdout: true) do
-      {branch, 0} -> String.trim(branch)
-      _ -> "main"
+  # The commit, not the branch name: a real base branch is fetched from
+  # origin before it is cut from, and the demo touches no network.
+  defp current_commit do
+    case System.cmd("git", ["rev-parse", "HEAD"], stderr_to_stdout: true) do
+      {sha, 0} -> String.trim(sha)
+      _ -> "HEAD"
     end
   end
 

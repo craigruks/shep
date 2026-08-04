@@ -136,3 +136,115 @@ defmodule Shep.AgentRunnerModelTest do
     end
   end
 end
+
+defmodule Shep.AgentRunnerHookGateTest do
+  @moduledoc """
+  Coverage for #62: a failed `on_worktree_ready` must stop the run before
+  the first turn.
+
+  `run/3` used to discard the hook's verdict, so a dead-network fetch or an
+  OOM install briefed a full agent turn into a checkout with no
+  dependencies — real model spend burned discovering a broken environment.
+  These drive the real `run/3 → Workspace.prepare → Hooks` path against a
+  git repo and a stub agent that records its own invocation, so "the agent
+  never started" is asserted from the filesystem rather than inferred.
+  """
+  use ExUnit.Case, async: true
+
+  alias Shep.AgentRunner
+
+  setup do
+    n = System.unique_integer([:positive])
+    dir = Path.join(System.tmp_dir!(), "shep_hookgate_#{n}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    %{n: n, dir: dir, repo: git_repo(Path.join(dir, "repo")), root: Path.join(dir, "worktrees")}
+  end
+
+  defp config(ctx, hook) do
+    %{
+      "workspace" => %{"repo" => ctx.repo, "root" => ctx.root},
+      "agent" => %{"command" => spy_agent(ctx.dir), "max_turns" => 1, "idle_timeout_ms" => 30_000},
+      "hooks" => %{"on_worktree_ready" => hook, "hook_timeout_ms" => 500}
+    }
+  end
+
+  defp run(ctx, hook) do
+    task = %Shep.Task{
+      id: "hg-#{ctx.n}",
+      branch: "shep/hg-#{ctx.n}",
+      base_branch: "main",
+      prompt: "p",
+      demo: true
+    }
+
+    AgentRunner.run(task, self(), %{config: config(ctx, hook)})
+  end
+
+  # Records that it ran, into the shared dir rather than the worktree, so
+  # the evidence outlives worktree cleanup.
+  defp spy_agent(dir) do
+    path = Path.join(dir, "spy_agent.sh")
+    File.write!(path, "#!/bin/sh\necho ran >> #{Path.join(dir, "spawned.txt")}\n")
+    File.chmod!(path, 0o755)
+    path
+  end
+
+  defp spawned?(ctx), do: File.exists?(Path.join(ctx.dir, "spawned.txt"))
+
+  defp git_repo(dir) do
+    File.mkdir_p!(dir)
+    run_git(dir, ["init", "-q", "-b", "main"])
+    run_git(dir, ["config", "user.email", "test@example.com"])
+    run_git(dir, ["config", "user.name", "Test"])
+    File.write!(Path.join(dir, "flock.txt"), "sheep")
+    run_git(dir, ["add", "."])
+    run_git(dir, ["commit", "-qm", "init"])
+    dir
+  end
+
+  defp run_git(dir, args) do
+    {_, 0} = System.cmd("git", ["-C", dir] ++ args, stderr_to_stdout: true)
+  end
+
+  test "a hook that exits non-zero fails the task before any agent runs", ctx do
+    result = run(ctx, "exit 1")
+
+    assert %Shep.Completion.Failed{reason: reason, recoverable: true} = result.completion
+    assert reason =~ "on_worktree_ready hook failed"
+    assert reason =~ "hook exited 1"
+    assert result.iterations == []
+    refute spawned?(ctx), "agent was spawned into a worktree whose setup hook failed"
+  end
+
+  test "the failed task's worktree is preserved for inspection", ctx do
+    result = run(ctx, "exit 1")
+
+    assert File.dir?(result.worktree_path)
+  end
+
+  test "a hook that times out fails the task before any agent runs", ctx do
+    result = run(ctx, "sleep 10")
+
+    assert %Shep.Completion.Failed{reason: reason, recoverable: true} = result.completion
+    assert reason =~ "hook timed out"
+    assert result.iterations == []
+    refute spawned?(ctx)
+  end
+
+  test "an absent hook leaves the run untouched and the agent starts", ctx do
+    result = run(ctx, nil)
+
+    assert spawned?(ctx), "agent never started even though no hook was configured"
+    assert %Shep.Completion.Complete{} = result.completion
+    assert length(result.iterations) == 1
+  end
+
+  test "a hook that succeeds leaves the run untouched and the agent starts", ctx do
+    result = run(ctx, "true")
+
+    assert spawned?(ctx)
+    assert %Shep.Completion.Complete{} = result.completion
+  end
+end

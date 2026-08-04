@@ -99,7 +99,10 @@ One `Task.Supervisor` child per issue. Each agent gets:
 1. **A claim.** The label flips to `shep:in-progress` so no one
    double-dispatches.
 2. **A worktree.** A fresh branch `shep/<issue>` off your base branch, deps
-   installed via your `on_worktree_ready` hook.
+   installed via your `on_worktree_ready` hook. That hook is a gate: if it
+   exits non-zero or times out the task fails before the first turn and is
+   retried, rather than briefing an agent into a broken checkout. Chain hook
+   commands with `&&`, not `;`, or the exit code never reaches Shep.
 3. **A briefing.** A prompt template picked by issue type (`type:test-fix`,
    `type:lint-fix`, …) with `` !`shell` `` expansion and `{{VAR}}`
    substitution.
@@ -112,6 +115,16 @@ One `Task.Supervisor` child per issue. Each agent gets:
    check logs back to the session, the fix gets pushed, CI re-runs.
    Attempts are capped; exhaustion means `shep:failed`, a preserved
    worktree, and a Slack ping.
+
+   Green means a check actually reported, never "nothing is failing":
+   GitHub builds no check suites for a PR it cannot merge, so a
+   conflicting PR shows zero failures forever. Shep reads mergeability
+   on every poll and sends a conflict back to the session as a fix turn
+   (merge the base, resolve, re-push), and a PR on which nothing reports
+   within `goal.ci_grace_ms` fails as unverified instead of being labelled
+   `shep:in-review`. Skipped and queued third-party checks are not
+   evidence. Set `goal.ci_required_checks: [quality, release-smoke]` to
+   demand named checks rather than any check at all.
 
 Supervision tree (the whole thing):
 
@@ -174,7 +187,7 @@ tracker:   { kind: "github", repo: "you/your-repo" }
 workspace: { root: ~/code/shep_worktrees }
 agent:     { command: "claude", model: "opus", max_concurrent: 3, max_turns: 10 }
 sandbox:   { snapshot: "snap_…", timeout: "45m" }   # see "Running agents in a sandbox"
-goal:      { verify: "mix quality", verify_fixes: 2, ci_fixes: 2 }
+goal:      { verify: "mix quality", verify_fixes: 2, ci_fixes: 2, ci_grace_ms: 300000 }
 hooks:     { on_worktree_ready: "pnpm install --frozen-lockfile" }
 staging:   { base_branch: "staging", pr_target: "staging" }
 ```
@@ -304,6 +317,15 @@ SHEP_WORKFLOW=.shep/WORKFLOW.thatrepo.md just shep up
 ```
 
 One dog, many flocks. The tracked `WORKFLOW.md` stays a placeholder.
+
+That clone is long-lived and nothing else refreshes it, so Shep fetches
+`staging.base_branch` from `origin` before every cut and branches from the
+remote-tracking ref — never from the clone's local copy of it. The fetch is
+serialized per repo path, so two dispatches in the same tick cannot lose a
+race on git's ref locks and leave one agent on a stale base. A fetch that
+fails fails the dispatch (retryable) rather than shipping an old base
+silently; a base branch that tracks no remote — the demo's — is used as
+given.
 
 ## Commands (speak dog)
 
