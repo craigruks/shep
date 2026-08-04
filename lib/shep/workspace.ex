@@ -166,7 +166,7 @@ defmodule Shep.Workspace do
     case System.cmd("/bin/sh", ["-c", command],
            cd: path,
            stderr_to_stdout: true,
-           env: Shep.Env.unset()
+           env: Shep.Env.for_child()
          ) do
       {out, 0} -> {:ok, out}
       {out, _code} -> {:error, out}

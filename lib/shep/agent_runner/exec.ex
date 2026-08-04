@@ -57,7 +57,7 @@ defmodule Shep.AgentRunner.Exec do
         {:line, @max_line_length},
         :stderr_to_stdout,
         {:cd, cwd},
-        {:env, Shep.Env.port_unset()},
+        {:env, Shep.Env.for_port()},
         {:args, ["-c", @exec_with_closed_stdin, exe | args]}
       ])
 

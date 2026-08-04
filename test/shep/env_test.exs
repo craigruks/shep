@@ -34,21 +34,40 @@ defmodule Shep.EnvTest do
     dir
   end
 
-  describe "unset/0" do
-    test "lists the ERTS and RELEASE variables a bundled runtime exports" do
+  describe "for_child/0" do
+    test "unsets the ERTS and RELEASE variables a bundled runtime exports" do
       leak_release_env()
-      keys = Env.unset() |> Enum.map(&elem(&1, 0))
+      unset = for {k, nil} <- Env.for_child(), do: k
 
       for var <- ~w(ROOTDIR BINDIR PROGNAME EMU RELEASE_ROOT) do
-        assert var in keys, "#{var} should be unset for children"
+        assert var in unset, "#{var} should be unset for children"
       end
-
-      assert Enum.all?(Env.unset(), &(elem(&1, 1) == nil))
     end
 
     test "lists nothing that is not actually set, leaving the child alone" do
-      for k <- ~w(ROOTDIR BINDIR PROGNAME EMU), do: System.delete_env(k)
-      refute Enum.any?(Env.unset(), &(elem(&1, 0) in ~w(ROOTDIR BINDIR PROGNAME EMU)))
+      for k <- ~w(ROOTDIR BINDIR PROGNAME EMU RELEASE_ROOT), do: System.delete_env(k)
+      assert Env.for_child() == []
+    end
+  end
+
+  # Unsetting the variables is not enough on its own: the release also
+  # prepends its erts-*/bin to PATH, and an `erl` found there derives the
+  # release root straight back from its own location.
+  describe "strip_release_dirs/2" do
+    test "drops every entry inside the release root, keeping the rest in order" do
+      root = "/rel/shep"
+      path = "/rel/shep/erts-16.4/bin:/rel/shep/bin:/usr/local/bin:/usr/bin"
+
+      assert Env.strip_release_dirs(path, root) == "/usr/local/bin:/usr/bin"
+    end
+
+    test "leaves a PATH that never mentions the release untouched" do
+      assert Env.strip_release_dirs("/usr/bin:/bin", "/rel/shep") == "/usr/bin:/bin"
+    end
+
+    test "a lookalike prefix outside the root is kept" do
+      assert Env.strip_release_dirs("/rel/shep-other/bin:/bin", "/rel/shep") ==
+               "/rel/shep-other/bin:/bin"
     end
   end
 
