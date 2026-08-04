@@ -20,7 +20,11 @@ defmodule Shep.Hooks do
 
     task =
       Task.async(fn ->
-        System.cmd("bash", ["-c", command], cd: cwd, stderr_to_stdout: true)
+        System.cmd("bash", ["-c", command],
+          cd: cwd,
+          stderr_to_stdout: true,
+          env: Shep.Env.unset()
+        )
       end)
 
     case Task.yield(task, timeout) || Task.shutdown(task) do
