@@ -19,7 +19,11 @@ defmodule Shep.Sandbox do
 
   @doc "The sandbox name for a task. Deterministic, so resume finds it."
   @spec name(Shep.Task.t()) :: String.t()
-  def name(%Shep.Task{id: id}) do
+  def name(%Shep.Task{id: id}), do: name_for_id(id)
+
+  @doc "The sandbox name for a bare task id, for callers holding no task."
+  @spec name_for_id(String.t()) :: String.t()
+  def name_for_id(id) do
     @name_prefix <> String.replace(to_string(id), ~r/[^a-zA-Z0-9_-]/, "-")
   end
 

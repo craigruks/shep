@@ -235,6 +235,48 @@ defmodule Shep.Orchestrator.Poller do
     %{state | tick_timer: timer, tick_token: token}
   end
 
+  @doc """
+  Schedule the next tidy sweep, cancelling any pending one.
+
+  Returns the state unchanged when `workspace.tidy_interval_ms` is zero or
+  absent, so the sweep is opt-out without a separate flag.
+  """
+  @spec schedule_tidy(struct()) :: struct()
+  def schedule_tidy(state) do
+    if state.tidy_timer, do: Process.cancel_timer(state.tidy_timer)
+
+    case get_in(current_config(), ["workspace", "tidy_interval_ms"]) do
+      interval when is_integer(interval) and interval > 0 ->
+        token = make_ref()
+        timer = Process.send_after(self(), {:tidy, token}, interval)
+        %{state | tidy_timer: timer, tidy_token: token}
+
+      _ ->
+        %{state | tidy_timer: nil, tidy_token: nil}
+    end
+  end
+
+  @doc """
+  Run a tidy sweep off the orchestrator process.
+
+  Reclaiming touches git and the network, so it happens in a supervised
+  Task: the error kernel holds, and a slow fetch never stalls dispatch.
+  """
+  @spec start_tidy() :: :ok
+  def start_tidy do
+    Task.Supervisor.start_child(Shep.TaskSupervisor, fn ->
+      report = Shep.Tidy.run()
+      reaped = length(report.reaped)
+      sandboxes = length(report.sandboxes)
+
+      if reaped > 0 or sandboxes > 0 do
+        Logger.info("Tidy reclaimed #{reaped} worktree(s), #{sandboxes} sandbox(es)")
+      end
+    end)
+
+    :ok
+  end
+
   @doc "Prune leftover git worktrees at boot so stale state does not accumulate."
   @spec reconcile_worktrees() :: :ok
   def reconcile_worktrees do

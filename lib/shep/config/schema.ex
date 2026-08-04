@@ -3,7 +3,11 @@ defmodule Shep.Config.Schema do
 
   @defaults %{
     "polling" => %{"interval_ms" => 30_000},
-    "workspace" => %{"root" => "~/code/shep_worktrees", "repo" => "."},
+    "workspace" => %{
+      "root" => "~/code/shep_worktrees",
+      "repo" => ".",
+      "tidy_interval_ms" => 3_600_000
+    },
     "goal" => %{
       "verify" => nil,
       "verify_fixes" => 2,
