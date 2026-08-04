@@ -77,6 +77,7 @@ defmodule Shep.Task do
     :depends_on,
     :model,
     agent: :claude,
+    location: :local,
     base_branch: "staging",
     prompt_args: %{},
     no_merge: false,
@@ -84,6 +85,7 @@ defmodule Shep.Task do
   ]
 
   @type agent :: :claude | :codex
+  @type location :: :local | :vercel
 
   @type t :: %__MODULE__{
           id: String.t(),
@@ -94,6 +96,7 @@ defmodule Shep.Task do
           type: String.t() | nil,
           depends_on: [String.t()] | nil,
           agent: agent(),
+          location: location(),
           model: String.t() | nil,
           no_merge: boolean(),
           demo: boolean()

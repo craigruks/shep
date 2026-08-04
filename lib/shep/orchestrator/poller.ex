@@ -204,8 +204,14 @@ defmodule Shep.Orchestrator.Poller do
   @spec kill_task(String.t(), struct()) :: :ok
   def kill_task(task_id, state) do
     case Map.get(state.running, task_id) do
-      %{pid: pid} -> Process.exit(pid, :kill)
-      nil -> :ok
+      %{pid: pid, task: task} ->
+        Process.exit(pid, :kill)
+        # The runner's own cleanup dies with the process, so a remote
+        # workspace has to be released here or it bills until its timeout.
+        Shep.Sandbox.release(task)
+
+      _ ->
+        :ok
     end
 
     :ok
@@ -229,6 +235,48 @@ defmodule Shep.Orchestrator.Poller do
     %{state | tick_timer: timer, tick_token: token}
   end
 
+  @doc """
+  Schedule the next tidy sweep, cancelling any pending one.
+
+  Returns the state unchanged when `workspace.tidy_interval_ms` is zero or
+  absent, so the sweep is opt-out without a separate flag.
+  """
+  @spec schedule_tidy(struct()) :: struct()
+  def schedule_tidy(state) do
+    if state.tidy_timer, do: Process.cancel_timer(state.tidy_timer)
+
+    case get_in(current_config(), ["workspace", "tidy_interval_ms"]) do
+      interval when is_integer(interval) and interval > 0 ->
+        token = make_ref()
+        timer = Process.send_after(self(), {:tidy, token}, interval)
+        %{state | tidy_timer: timer, tidy_token: token}
+
+      _ ->
+        %{state | tidy_timer: nil, tidy_token: nil}
+    end
+  end
+
+  @doc """
+  Run a tidy sweep off the orchestrator process.
+
+  Reclaiming touches git and the network, so it happens in a supervised
+  Task: the error kernel holds, and a slow fetch never stalls dispatch.
+  """
+  @spec start_tidy() :: :ok
+  def start_tidy do
+    Task.Supervisor.start_child(Shep.TaskSupervisor, fn ->
+      report = Shep.Tidy.run()
+      reaped = length(report.reaped)
+      sandboxes = length(report.sandboxes)
+
+      if reaped > 0 or sandboxes > 0 do
+        Logger.info("Tidy reclaimed #{reaped} worktree(s), #{sandboxes} sandbox(es)")
+      end
+    end)
+
+    :ok
+  end
+
   @doc "Prune leftover git worktrees at boot so stale state does not accumulate."
   @spec reconcile_worktrees() :: :ok
   def reconcile_worktrees do
@@ -248,8 +296,27 @@ defmodule Shep.Orchestrator.Poller do
         Shep.Worktree.prune(repo)
         Logger.info("Reconciled worktrees in #{root}")
       end
+
+      reconcile_sandboxes(config)
     end
 
     :ok
+  end
+
+  # Nothing is running at boot, so every sandbox this daemon could have
+  # created is an orphan a crash left billing. Skipped entirely unless
+  # sandboxes are configured, so the local-only path costs no CLI call.
+  defp reconcile_sandboxes(config) do
+    case get_in(config, ["sandbox", "snapshot"]) do
+      snapshot when is_binary(snapshot) and snapshot != "" ->
+        case Shep.Sandbox.sweep(config, []) do
+          {:ok, []} -> :ok
+          {:ok, names} -> Logger.info("Reaped #{length(names)} orphaned sandbox(es) at boot")
+          {:error, reason} -> Logger.warning("Could not reconcile sandboxes: #{reason}")
+        end
+
+      _ ->
+        :ok
+    end
   end
 end

@@ -8,7 +8,7 @@ defmodule Shep.AgentRunner.PRDemoTest do
       task = %Shep.Task{id: "demo-t", branch: "shep/demo-t", prompt: "x", demo: true}
       completion = %Shep.Completion.Complete{summary: "done"}
 
-      assert :none == PR.create(completion, task, "/nonexistent", %{})
+      assert :none == PR.create(completion, task, Shep.Workspace.local("/nonexistent"), %{})
     end
   end
 end
@@ -75,7 +75,7 @@ defmodule Shep.AgentRunner.PRCreateTest do
     task = %Shep.Task{id: "pr-1", branch: "shep/pr-1", prompt: "p"}
 
     assert {:ok, "https://github.com/org/repo/pull/9"} =
-             PR.create(%Complete{summary: "did it"}, task, wt, config())
+             PR.create(%Complete{summary: "did it"}, task, Shep.Workspace.local(wt), config())
 
     assert_received {:gh, ["pr", "create" | create_args]}
     refute "--label" in create_args
@@ -96,7 +96,8 @@ defmodule Shep.AgentRunner.PRCreateTest do
     wt = clean_committed_worktree("shep/pr-3")
     task = %Shep.Task{id: "pr-3", branch: "shep/pr-3", prompt: "p"}
 
-    assert {:ok, url} = PR.create(%Complete{summary: "did it"}, task, wt, config())
+    assert {:ok, url} =
+             PR.create(%Complete{summary: "did it"}, task, Shep.Workspace.local(wt), config())
 
     assert_received {:gh, ["pr", "comment", ^url, "--repo", "org/repo", "--body", body]}
     assert body =~ "Herded by Shep"
@@ -115,7 +116,8 @@ defmodule Shep.AgentRunner.PRCreateTest do
     task = %Shep.Task{id: "pr-4", branch: "shep/pr-4", prompt: "p"}
     cfg = put_in(config(), ["pr"], %{"sign" => false})
 
-    assert {:ok, _url} = PR.create(%Complete{summary: "did it"}, task, wt, cfg)
+    assert {:ok, _url} =
+             PR.create(%Complete{summary: "did it"}, task, Shep.Workspace.local(wt), cfg)
 
     refute_received {:comment, _}
   end
@@ -131,7 +133,7 @@ defmodule Shep.AgentRunner.PRCreateTest do
     task = %Shep.Task{id: "pr-5", branch: "shep/pr-5", prompt: "p"}
 
     assert {:ok, "https://github.com/org/repo/pull/13"} =
-             PR.create(%Complete{summary: "did it"}, task, wt, config())
+             PR.create(%Complete{summary: "did it"}, task, Shep.Workspace.local(wt), config())
 
     assert "pr-created" == Shep.Tracker.Memory.get_status("pr-5")
   end
@@ -148,7 +150,8 @@ defmodule Shep.AgentRunner.PRCreateTest do
     wt = clean_committed_worktree("shep/pr-2")
     task = %Shep.Task{id: "pr-2", branch: "shep/pr-2", prompt: "p", no_merge: true}
 
-    assert {:ok, _url} = PR.create(%Complete{summary: "did it"}, task, wt, config())
+    assert {:ok, _url} =
+             PR.create(%Complete{summary: "did it"}, task, Shep.Workspace.local(wt), config())
 
     assert_received {:gh, edit_args}
     assert "shep:no-merge" == List.last(edit_args)

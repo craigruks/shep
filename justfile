@@ -13,6 +13,7 @@
 #   run <issue>      fetch <issue>    dispatch an agent on one issue
 #   queue            pen              list templates + queued candidates
 #   ps               flock            status JSON (running, paused, claimed)
+#   tidy             muck             reclaim worktrees/sandboxes no live task owns
 #   pause <id>       heel <id>        pause task (preserves worktree + session)
 #   resume <id>      send <id>        resume paused task (--continue)
 #   attach <id>      take <id>        shepherd steps in: pause → Claude session → offer resume
@@ -44,6 +45,7 @@ shep cmd id="":
     trail) CMD=session ;;
     field) CMD=view ;;
     drop)  CMD=kill ;;
+    muck)  CMD=tidy ;;
     home)    CMD=promote ;;
     bark)    CMD=speak ;;
     trial)   CMD=demo ;;
@@ -125,6 +127,10 @@ shep cmd id="":
       ;;
     ps)
       mix shep.status 2>/dev/null
+      ;;
+    tidy)
+      # {{id}} carries the optional --dry-run flag: `just shep tidy --dry-run`
+      mix shep.tidy {{id}}
       ;;
     pause)
       need_id
@@ -271,6 +277,7 @@ shep cmd id="":
       echo "  run <issue>      fetch <issue>    dispatch an agent on one issue"
       echo "  queue            pen              list templates + queued candidates"
       echo "  ps               flock            status JSON"
+      echo "  tidy [--dry-run] muck             reclaim workspaces no live task owns"
       echo "  pause <id>       heel <id>        pause task (preserves worktree + session)"
       echo "  resume <id>      send <id>        resume paused task"
       echo "  attach <id>      take <id>        shepherd steps in (pause → Claude → resume)"

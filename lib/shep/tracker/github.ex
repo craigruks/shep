@@ -15,6 +15,7 @@ defmodule Shep.Tracker.GitHub do
   @label_no_merge "shep:no-merge"
   @label_codex "shep:codex"
   @label_model "shep:model:"
+  @label_sandbox "shep:sandbox"
 
   # Model names and ids only: aliases (`opus`), pinned ids
   # (`claude-opus-5-20251101`), and bracketed variants (`claude-opus-5[1m]`).
@@ -48,7 +49,7 @@ defmodule Shep.Tracker.GitHub do
          ]) do
       {:ok, json} ->
         issues = Jason.decode!(json)
-        tasks = Enum.map(issues, &issue_to_task(&1, base_branch))
+        tasks = Enum.map(issues, &issue_to_task(&1, base_branch, config))
         {:ok, tasks}
 
       {:error, reason} ->
@@ -168,6 +169,22 @@ defmodule Shep.Tracker.GitHub do
     end)
   end
 
+  @doc """
+  Parse the execution location from issue labels.
+
+  `shep:sandbox` runs the task in a Vercel sandbox; anything else runs it
+  in a local git worktree. nil means "fall back to `agent.location`".
+  """
+  @spec parse_location([map()]) :: Shep.Task.location() | nil
+  def parse_location(labels) when is_list(labels) do
+    if Enum.any?(labels, fn
+         %{"name" => @label_sandbox} -> true
+         _ -> false
+       end),
+       do: :vercel,
+       else: nil
+  end
+
   defp valid_model(value) do
     if Regex.match?(@model_pattern, value) do
       value
@@ -177,7 +194,7 @@ defmodule Shep.Tracker.GitHub do
     end
   end
 
-  defp issue_to_task(issue, base_branch) do
+  defp issue_to_task(issue, base_branch, config) do
     number = to_string(issue["number"])
     labels = issue["labels"] || []
     task_type = parse_task_type(labels)
@@ -198,6 +215,7 @@ defmodule Shep.Tracker.GitHub do
       depends_on: depends_on,
       agent: parse_agent(labels),
       model: parse_model(labels),
+      location: parse_location(labels) || Shep.Config.location(config),
       no_merge: no_merge?(labels)
     }
   end

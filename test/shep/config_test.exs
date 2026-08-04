@@ -58,3 +58,20 @@ defmodule Shep.ConfigTest do
     assert {:ok, %{"polling" => %{"interval_ms" => 1000}}} = GenServer.call(pid, :current)
   end
 end
+
+defmodule Shep.ConfigLocationTest do
+  use ExUnit.Case, async: true
+
+  test "location/1 maps the configured string, defaulting to local" do
+    assert :vercel == Shep.Config.location(%{"agent" => %{"location" => "vercel"}})
+    assert :local == Shep.Config.location(%{"agent" => %{"location" => "local"}})
+    assert :local == Shep.Config.location(%{})
+  end
+
+  # An unrecognised value must not reach String.to_atom/1: config is
+  # operator input, and minting atoms from it is unbounded.
+  test "an unknown location falls back to local instead of becoming an atom" do
+    assert :local == Shep.Config.location(%{"agent" => %{"location" => "fargate"}})
+    assert :local == Shep.Config.location(%{"agent" => %{"location" => nil}})
+  end
+end

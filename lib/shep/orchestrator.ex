@@ -12,6 +12,8 @@ defmodule Shep.Orchestrator do
   defstruct [
     :tick_timer,
     :tick_token,
+    :tidy_timer,
+    :tidy_token,
     running: %{},
     paused: %{},
     claimed: MapSet.new(),
@@ -58,7 +60,7 @@ defmodule Shep.Orchestrator do
     state = %__MODULE__{}
     Poller.reconcile_worktrees()
     Snapshot.write(state)
-    state = Poller.schedule_tick(state)
+    state = state |> Poller.schedule_tick() |> Poller.schedule_tidy()
     Logger.info("Orchestrator started")
     {:ok, state}
   end
@@ -67,9 +69,10 @@ defmodule Shep.Orchestrator do
   def terminate(reason, state) do
     Logger.info("Orchestrator shutting down: #{inspect(reason)}")
 
-    for {task_id, %{pid: pid}} <- state.running do
+    for {task_id, %{pid: pid, task: task}} <- state.running do
       Logger.info("Draining agent: #{task_id}")
       Process.exit(pid, :shutdown)
+      Shep.Sandbox.release(task)
     end
 
     :ok
@@ -95,10 +98,11 @@ defmodule Shep.Orchestrator do
       %{pid: pid} = entry ->
         Poller.cancel_watchdog(entry)
         Process.exit(pid, :kill)
+        Shep.Sandbox.release(entry.task)
         running = Map.delete(state.running, task_id)
         state = Dispatch.clean_retry(task_id, %{state | running: running})
         Snapshot.write(state)
-        Logger.info("Killed task #{task_id} (no retry, worktree preserved)")
+        Logger.info("Killed task #{task_id} (no retry, local worktree preserved)")
         {:reply, :ok, state}
     end
   end
@@ -159,6 +163,14 @@ defmodule Shep.Orchestrator do
   end
 
   def handle_info({:tick, _stale_token}, state), do: {:noreply, state}
+
+  @impl true
+  def handle_info({:tidy, token}, %{tidy_token: token} = state) do
+    Poller.start_tidy()
+    {:noreply, Poller.schedule_tidy(state)}
+  end
+
+  def handle_info({:tidy, _stale_token}, state), do: {:noreply, state}
 
   @impl true
   def handle_info({ref, _result}, state) when is_reference(ref) do

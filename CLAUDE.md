@@ -70,6 +70,7 @@ just shep attach <id>     # take:    shepherd steps in: pause → Claude → off
 just shep logs <id>       # watch:   tail a task's raw stdout
 just shep session <issue> # trail:   pretty-tail the agent's Claude session
 just shep kill <id>       # drop:    kill a stuck agent (no retry, worktree kept)
+just shep tidy            # muck:    reclaim workspaces no live task owns
 just shep view            # field:   tmux: orchestrator + auto-spawning task panes
 just shep promote         # home:    open the staging→main promotion PR
 just shep help            #           full command table
@@ -132,8 +133,55 @@ model names are logged and ignored, falling back to `agent.model`.
 Codex honours `shep:model:` too, but never inherits `agent.model`
 (that names a Claude model); an un-overridden Codex task runs on the
 Codex CLI's own default.
+
+## Execution Location
+
+Orthogonal to *what* runs: *where* it runs. `agent.location` picks the
+fleet default (`local`, the git worktree); a `shep:sandbox` label runs
+that issue in a Vercel sandbox instead — provisioned from
+`sandbox.snapshot`, cloned over https with a token from
+`sandbox.github_token_command`. `Shep.Workspace` is the whole boundary:
+prepare, run the agent, run a shell command, run git, clean up.
+`Shep.AgentRunner.Exec` is location-blind, because `sandbox exec` streams
+line by line and propagates exit codes — a remote turn is the same Port
+with a different command.
+
+A sandbox is metered, so nothing keeps one alive by default. Success
+removes it; failure pushes the task branch first so the agent's commits
+survive, then removes it (`sandbox.keep_on_failure` holds it open for
+live debugging). Drain, watchdog kill, total timeout, and `just shep
+kill` all release it too, since the runner's own cleanup dies with the
+process — and a boot sweep reaps what a crash left behind.
+
+`shep:codex` + `shep:sandbox` is rejected up front: no Codex credential
+is forwarded, so it would 401 remotely. The snapshot carries no Elixir,
+so this repo's own `goal.verify` cannot run in a sandbox yet.
 Agent-specific modules: `AgentRunner.Claude`, `AgentRunner.Codex`.
 Claude sessions use `--name "shep-{id}"` for persistence.
+
+## Tidy
+
+A worktree outlives its run three ways: the task was interrupted (the
+runner's cleanup dies with the process), it failed and was preserved for
+post-mortem, or it was dirty and `Worktree.remove` refused. Boot only
+prunes registrations for directories already gone, so the rest piled up
+until someone noticed them in a UI.
+
+`Shep.Tidy` reclaims them. `just shep tidy [--dry-run]` runs a pass by
+hand; set `workspace.tidy_interval_ms` to have the daemon sweep on a
+timer (shipped default `0`, off — an unattended deleter is opt-in). The
+sweep runs in a supervised Task, never inline, since it touches git and
+the network.
+
+The rule is deliberately not "the issue looks finished": a label says
+what a tracker believes, not whether this directory holds the only copy
+of something. A worktree goes only when no task is running or paused in
+it, the tree is clean, and its HEAD is contained in some remote branch —
+pushed or merged, and it belongs to this clone (flocks can share a
+worktree root). Decided from git alone. Everything else is reported and
+left. Note "clean" is git's definition: ignored files do not count, so a
+worktree holding only a hook-written `.env` is reclaimed. The same pass runs `Sandbox.sweep/2`, so both kinds of
+workspace are covered by one job.
 
 ## Pause/Resume
 

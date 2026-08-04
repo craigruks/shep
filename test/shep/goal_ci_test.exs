@@ -25,8 +25,9 @@ defmodule Shep.GoalCILoopTest do
   # exactly the wiring AgentRunner.run/3 performs in production.
   defp ci(final, pr_url, task, wt, config) do
     opid = self()
-    run_turn = fn prompt -> Shep.AgentRunner.fix_turn(prompt, wt, task, config, opid) end
-    Shep.Goal.ci_loop(final, pr_url, task, wt, config, opid, run_turn)
+    ws = Shep.Workspace.local(wt)
+    run_turn = fn prompt -> Shep.AgentRunner.fix_turn(prompt, ws, task, config, opid) end
+    Shep.Goal.ci_loop(final, pr_url, task, ws, config, opid, run_turn)
   end
 
   defp tmp_dir(prefix) do

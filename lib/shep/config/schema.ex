@@ -3,7 +3,11 @@ defmodule Shep.Config.Schema do
 
   @defaults %{
     "polling" => %{"interval_ms" => 30_000},
-    "workspace" => %{"root" => "~/code/shep_worktrees", "repo" => "."},
+    "workspace" => %{
+      "root" => "~/code/shep_worktrees",
+      "repo" => ".",
+      "tidy_interval_ms" => 0
+    },
     "goal" => %{
       "verify" => nil,
       "verify_fixes" => 2,
@@ -12,12 +16,21 @@ defmodule Shep.Config.Schema do
     "agent" => %{
       "command" => "claude",
       "model" => "opus",
+      "location" => "local",
       "max_concurrent" => 3,
       "max_turns" => 10,
       "idle_timeout_ms" => 600_000,
       "total_timeout_ms" => 1_200_000,
       "watchdog_interval_ms" => 15_000,
       "heartbeat_quiet_ms" => 30_000
+    },
+    "sandbox" => %{
+      "snapshot" => nil,
+      "timeout" => "45m",
+      "remote_path" => "/vercel/sandbox/app",
+      "tag" => "shep=1",
+      "keep_on_failure" => false,
+      "github_token_command" => "gh auth token"
     },
     "hooks" => %{
       "on_worktree_ready" => nil,

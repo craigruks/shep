@@ -28,8 +28,9 @@ defmodule Shep.GoalVerifyLoopTest do
   # exactly the wiring AgentRunner.run/3 performs in production.
   defp verify(final, task, dir, config) do
     opid = self()
-    run_turn = fn prompt -> Shep.AgentRunner.fix_turn(prompt, dir, task, config, opid) end
-    Shep.Goal.verify_loop(final, task, dir, config, opid, run_turn)
+    ws = Shep.Workspace.local(dir)
+    run_turn = fn prompt -> Shep.AgentRunner.fix_turn(prompt, ws, task, config, opid) end
+    Shep.Goal.verify_loop(final, task, ws, config, opid, run_turn)
   end
 
   test "green verify on the first try returns the completion unchanged" do

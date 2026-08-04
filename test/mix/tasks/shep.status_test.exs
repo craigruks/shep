@@ -16,6 +16,7 @@ defmodule Mix.Tasks.Shep.StatusTest do
     assert out.running["s1"] == %{
              type: "custom",
              agent: :claude,
+             location: :local,
              model: nil,
              elapsed_ms: 1234,
              idle_ms: 42
