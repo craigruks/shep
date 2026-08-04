@@ -23,7 +23,7 @@ defmodule Shep.Hooks do
         System.cmd("bash", ["-c", command],
           cd: cwd,
           stderr_to_stdout: true,
-          env: Shep.Env.unset()
+          env: Shep.Env.for_child()
         )
       end)
 
