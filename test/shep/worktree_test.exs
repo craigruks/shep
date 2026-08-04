@@ -99,3 +99,81 @@ defmodule Shep.WorktreeRepoParamTest do
     refute File.dir?(path)
   end
 end
+
+defmodule Shep.WorktreeFreshBaseTest do
+  use ExUnit.Case, async: true
+
+  # The clone Shep cuts from is long-lived and nothing else refreshes it,
+  # so `create` fetches first — including when several cuts land at once.
+  setup do
+    n = System.unique_integer([:positive])
+    tmp = System.tmp_dir!()
+    origin = Path.join(tmp, "shep_fresh_origin_#{n}")
+    clone = Path.join(tmp, "shep_fresh_clone_#{n}")
+    seed = Path.join(tmp, "shep_fresh_seed_#{n}")
+    root = Path.join(tmp, "shep_fresh_root_#{n}")
+
+    on_exit(fn -> Enum.each([origin, clone, seed, root], &File.rm_rf!/1) end)
+
+    git!(["init", "-q", "--bare", "-b", "main", origin])
+    File.mkdir_p!(seed)
+    git!(["-C", seed, "init", "-q", "-b", "main"])
+    git!(["-C", seed, "config", "user.email", "test@example.com"])
+    git!(["-C", seed, "config", "user.name", "Test"])
+    git!(["-C", seed, "remote", "add", "origin", origin])
+    commit(seed, "sheep")
+    git!(["-C", seed, "push", "-q", "origin", "main"])
+    git!(["clone", "-q", origin, clone])
+
+    %{origin: origin, clone: clone, seed: seed, root: root, n: n}
+  end
+
+  test "cuts from the remote tip, not the clone's stale copy", ctx do
+    advance(ctx.seed, "more sheep")
+
+    assert {:ok, path} = Shep.Worktree.create("shep/fresh-#{ctx.n}", "main", ctx.root, ctx.clone)
+    assert File.read!(Path.join(path, "flock.txt")) == "more sheep"
+  end
+
+  test "concurrent cuts all land on the remote tip", ctx do
+    advance(ctx.seed, "more sheep")
+
+    results =
+      1..4
+      |> Task.async_stream(
+        fn i -> Shep.Worktree.create("shep/race-#{ctx.n}-#{i}", "main", ctx.root, ctx.clone) end,
+        timeout: 60_000
+      )
+      |> Enum.map(fn {:ok, result} -> result end)
+
+    for result <- results do
+      assert {:ok, path} = result
+      assert File.read!(Path.join(path, "flock.txt")) == "more sheep"
+    end
+  end
+
+  test "a failed fetch fails the cut instead of using a stale base", ctx do
+    File.rm_rf!(ctx.origin)
+    branch = "shep/nofetch-#{ctx.n}"
+
+    assert {:error, reason} = Shep.Worktree.create(branch, "main", ctx.root, ctx.clone)
+    assert reason =~ "git fetch"
+    refute File.dir?(Shep.Worktree.path_for(branch, ctx.root))
+  end
+
+  defp git!(args) do
+    {out, 0} = System.cmd("git", args, stderr_to_stdout: true)
+    out
+  end
+
+  defp commit(repo, content) do
+    File.write!(Path.join(repo, "flock.txt"), content)
+    git!(["-C", repo, "add", "."])
+    git!(["-C", repo, "commit", "-qm", content])
+  end
+
+  defp advance(seed, content) do
+    commit(seed, content)
+    git!(["-C", seed, "push", "-q", "origin", "main"])
+  end
+end
