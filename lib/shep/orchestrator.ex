@@ -12,6 +12,8 @@ defmodule Shep.Orchestrator do
   defstruct [
     :tick_timer,
     :tick_token,
+    :tidy_timer,
+    :tidy_token,
     running: %{},
     paused: %{},
     claimed: MapSet.new(),
@@ -58,7 +60,7 @@ defmodule Shep.Orchestrator do
     state = %__MODULE__{}
     Poller.reconcile_worktrees()
     Snapshot.write(state)
-    state = Poller.schedule_tick(state)
+    state = state |> Poller.schedule_tick() |> Poller.schedule_tidy()
     Logger.info("Orchestrator started")
     {:ok, state}
   end
@@ -161,6 +163,14 @@ defmodule Shep.Orchestrator do
   end
 
   def handle_info({:tick, _stale_token}, state), do: {:noreply, state}
+
+  @impl true
+  def handle_info({:tidy, token}, %{tidy_token: token} = state) do
+    Poller.start_tidy()
+    {:noreply, Poller.schedule_tidy(state)}
+  end
+
+  def handle_info({:tidy, _stale_token}, state), do: {:noreply, state}
 
   @impl true
   def handle_info({ref, _result}, state) when is_reference(ref) do

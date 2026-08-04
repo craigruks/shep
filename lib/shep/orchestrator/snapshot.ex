@@ -65,6 +65,7 @@ defmodule Shep.Orchestrator.Snapshot do
           {id,
            %{
              task_type: entry.task.type,
+             branch: entry.task.branch,
              agent: entry.task.agent,
              location: entry.task.location,
              model: Map.get(entry, :model),
@@ -79,6 +80,7 @@ defmodule Shep.Orchestrator.Snapshot do
           {id,
            %{
              task_type: pt.task.type,
+             branch: pt.task.branch,
              worktree_path: pt.worktree_path,
              session_name: pt.session_name,
              paused_at: pt.paused_at

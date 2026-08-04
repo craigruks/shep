@@ -8,8 +8,7 @@ defmodule Shep.Worktree do
           {:ok, String.t()} | {:error, String.t()}
   def create(branch, base_branch, root, repo \\ ".")
       when is_binary(branch) and is_binary(base_branch) do
-    safe_name = sanitize_branch(branch)
-    path = Path.expand(Path.join(root, safe_name))
+    path = path_for(branch, root)
 
     cleanup_stale(branch, path, repo)
 
@@ -85,6 +84,18 @@ defmodule Shep.Worktree do
       {:error, _} ->
         []
     end
+  end
+
+  @doc """
+  The worktree path a branch maps to under `root`.
+
+  Deterministic, so a caller can name a task's worktree without having
+  created it — `Shep.Tidy` uses it to spare a worktree whose task has not
+  yet reported where it landed.
+  """
+  @spec path_for(String.t(), String.t()) :: String.t()
+  def path_for(branch, root) when is_binary(branch) and is_binary(root) do
+    Path.expand(Path.join(root, sanitize_branch(branch)))
   end
 
   @doc false

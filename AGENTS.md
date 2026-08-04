@@ -70,6 +70,7 @@ just shep attach <id>     # take:    shepherd steps in: pause → Claude → off
 just shep logs <id>       # watch:   tail a task's raw stdout
 just shep session <issue> # trail:   pretty-tail the agent's Claude session
 just shep kill <id>       # drop:    kill a stuck agent (no retry, worktree kept)
+just shep tidy            # muck:    reclaim workspaces no live task owns
 just shep view            # field:   tmux: orchestrator + auto-spawning task panes
 just shep promote         # home:    open the staging→main promotion PR
 just shep help            #           full command table
@@ -157,6 +158,27 @@ is forwarded, so it would 401 remotely. The snapshot carries no Elixir,
 so this repo's own `goal.verify` cannot run in a sandbox yet.
 Agent-specific modules: `AgentRunner.Claude`, `AgentRunner.Codex`.
 Claude sessions use `--name "shep-{id}"` for persistence.
+
+## Tidy
+
+A worktree outlives its run three ways: the task was interrupted (the
+runner's cleanup dies with the process), it failed and was preserved for
+post-mortem, or it was dirty and `Worktree.remove` refused. Boot only
+prunes registrations for directories already gone, so the rest piled up
+until someone noticed them in a UI.
+
+`Shep.Tidy` reclaims them, and the daemon runs it every
+`workspace.tidy_interval_ms` (default hourly, `0` disables) in a
+supervised Task — never inline, since it touches git and the network.
+`just shep tidy [--dry-run]` runs the same pass by hand.
+
+The rule is deliberately not "the issue looks finished": a label says
+what a tracker believes, not whether this directory holds the only copy
+of something. A worktree goes only when no task is running or paused in
+it, the tree is clean, and its HEAD is contained in some remote branch —
+pushed or merged. Decided from git alone. Everything else is reported
+and left. The same pass runs `Sandbox.sweep/2`, so both kinds of
+workspace are covered by one job.
 
 ## Pause/Resume
 
