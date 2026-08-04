@@ -173,7 +173,7 @@ concurrency, timeouts, or the tracker while Shep is running. No restarts.
 tracker:   { kind: "github", repo: "you/your-repo" }
 workspace: { root: ~/code/shep_worktrees }
 agent:     { command: "claude", model: "opus", max_concurrent: 3, max_turns: 10 }
-sandbox:   { snapshot: "snap_…", timeout: "45m", keep_on_failure: false }
+sandbox:   { snapshot: "snap_…", timeout: "45m" }   # see "Running agents in a sandbox"
 goal:      { verify: "mix quality", verify_fixes: 2, ci_fixes: 2 }
 hooks:     { on_worktree_ready: "pnpm install --frozen-lockfile" }
 staging:   { base_branch: "staging", pr_target: "staging" }
@@ -185,9 +185,95 @@ location each running task is on.
 
 Two independent axes: **what** runs (`shep:codex`, `shep:model:…`) and **where**
 it runs (`shep:sandbox` → a Vercel sandbox instead of a local worktree). They
-compose. A sandbox task needs `sandbox.snapshot` set and the `sandbox` CLI
-authed; its checkout, agent session, and branch all live and die with the
-sandbox.
+compose. Read [Running agents in a sandbox](#running-agents-in-a-sandbox-experimental)
+before turning the second one on: it sends real credentials to a cloud VM.
+
+## Running agents in a sandbox (experimental)
+
+`shep:sandbox` runs one issue on an ephemeral Vercel machine instead of a local
+git worktree. Provision → clone → agent → commit → push → PR takes about 80
+seconds. It is marked experimental for reasons listed at the end.
+
+### Read this first: what leaves your machine
+
+To run an agent remotely, Shep sends two secrets into a cloud VM you own:
+
+| secret | default source | scope |
+|---|---|---|
+| your Claude credential | macOS Keychain (`Claude Code-credentials`) | your whole Claude account |
+| a GitHub token | `gh auth token` | **every repo your account can reach** |
+
+The agent then runs there with `--dangerously-skip-permissions`. That is safer
+than the same flag locally — the blast radius is a VM that gets destroyed — but
+the credentials are real and they travel.
+
+**Narrow the GitHub token before using this on anything you care about.** Mint a
+fine-grained PAT scoped to the one repo and point Shep at it:
+
+```yaml
+sandbox:
+  github_token_command: "cat ~/.config/shep/repo-token"   # not `gh auth token`
+```
+
+On Linux there is no Keychain, so say where the credential lives:
+
+```yaml
+sandbox:
+  credential_command: "cat ~/.claude/.credentials.json"
+```
+
+On macOS do **not** use that file — it is stale there, and the sandbox will
+authenticate as nobody. The Keychain is the source of truth.
+
+### Bake a snapshot
+
+`sandbox.snapshot` has no default: it names a base image on *your* Vercel
+account holding the agent CLIs, so tasks do not reinstall them every run. Build
+one once — this is the exact sequence used to make the one in use here:
+
+```sh
+sandbox create --name shep-base --runtime node24 --timeout 20m
+sandbox exec shep-base -- sh -lc 'npm install -g @anthropic-ai/claude-code @openai/codex'
+sandbox snapshot shep-base --stop --expiration 0     # prints: ✔ Snapshot snap_… created.
+sandbox rm shep-base
+```
+
+The snapshot id is written to **stderr**, not stdout. Put it in your config:
+
+```yaml
+sandbox:
+  snapshot: "snap_…"
+  timeout: "45m"                 # keep >= agent.total_timeout_ms, with slack
+  remote_path: "/vercel/sandbox/app"
+  keep_on_failure: false
+```
+
+Check it before pointing Shep at it:
+
+```sh
+sandbox create --name check --snapshot snap_… --timeout 5m
+sandbox exec check -- sh -lc 'command -v claude codex git'
+sandbox rm check
+```
+
+### What it costs, and when it stops
+
+A sandbox is metered, so nothing keeps one alive by default. Success removes it.
+Failure pushes the task branch first — so the agent's commits survive as a remote
+branch you can fetch — then removes it; `keep_on_failure: true` holds it open for
+live debugging instead. Drain, watchdog kill, total timeout and `just shep kill`
+all release it, and a boot sweep reaps what a crash left behind. A **paused** task
+is the one case that keeps billing, deliberately: resume needs the machine, and
+its checkout, session, and branch all die with it.
+
+### Why "experimental"
+
+- The snapshot carries no Elixir, Ruby, or Python toolchain, so a repo whose
+  `goal.verify` needs one cannot verify remotely yet. Bake your own.
+- `shep:codex` + `shep:sandbox` is rejected up front: no Codex credential is
+  forwarded, so it would 401 remotely.
+- Pause/resume of a sandbox task, and the CI fix loop pushing from a sandbox,
+  are implemented but have not been exercised on a live run.
 
 ## Herded by Shep
 
@@ -266,7 +352,7 @@ labels and logs.
 | `shep:promoted` | shipped |
 | `shep:codex` | route this issue to Codex instead of Claude |
 | `shep:model:<name>` | run this issue on a specific model, overriding `agent.model` (works for Codex too) |
-| `shep:sandbox` | run this issue in a Vercel sandbox instead of a local git worktree |
+| `shep:sandbox` | run this issue in a Vercel sandbox instead of a local git worktree (**experimental**, see below) |
 | `shep:no-merge` | open the PR but skip CI-watch / auto-merge labels |
 
 Dependencies work too: put `Depends on: #12, #45` in an issue body and Shep

@@ -21,6 +21,12 @@ defmodule Shep.Tidy do
   Decided from git alone, so it needs no tracker call, works offline
   (minus the freshness of one fetch), and cannot be fooled by a stale
   label. Anything else is reported and left alone.
+
+  One consequence worth stating plainly: "clean" is git's definition, and
+  git does not count ignored files. A worktree holding only a hook-written
+  `.env` and `node_modules` reads as clean and is reclaimed. That is the
+  intent — a worktree is disposable and the hook rewrites both on the next
+  dispatch — but anything you drop in by hand and gitignore goes with it.
   """
 
   require Logger

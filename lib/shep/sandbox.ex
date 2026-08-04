@@ -259,11 +259,10 @@ defmodule Shep.Sandbox do
   defp nil_if_empty(""), do: nil
   defp nil_if_empty(value), do: value
 
-  # The live Claude credential lives in the macOS Keychain; the copy in
-  # ~/.claude/.credentials.json is stale and authenticates as nobody.
-  # Linux has no Keychain, so the sandbox reads the file store instead.
+  # The forwarded credential lands in the sandbox's file store, which is
+  # what a Linux `claude` reads.
   defp forward_credentials(sandbox, config) do
-    with {:ok, credential} <- keychain_credential(),
+    with {:ok, credential} <- agent_credential(config),
          {:ok, home} <- remote_home(sandbox) do
       tmp = Path.join(System.tmp_dir!(), "shep-cred-#{System.unique_integer([:positive])}")
       File.write!(tmp, credential)
@@ -293,15 +292,45 @@ defmodule Shep.Sandbox do
     end
   end
 
-  defp keychain_credential do
-    case System.cmd("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
-           stderr_to_stdout: false
-         ) do
-      {out, 0} -> {:ok, String.trim(out)}
-      _ -> {:error, "no Claude credential in the Keychain — run `claude` and log in once"}
+  # macOS keeps the live credential in the Keychain, and the file at
+  # ~/.claude/.credentials.json is stale there — copying it authenticates
+  # as nobody. Elsewhere there is no Keychain, so the file *is* the store;
+  # `sandbox.credential_command` lets any host say how to produce one.
+  defp agent_credential(config) do
+    case get_in(config, ["sandbox", "credential_command"]) do
+      command when is_binary(command) and command != "" -> run_credential_command(command)
+      _ -> default_credential()
+    end
+  end
+
+  defp default_credential do
+    case :os.type() do
+      {:unix, :darwin} ->
+        run_credential_command(~S|security find-generic-password -s "Claude Code-credentials" -w|)
+
+      _ ->
+        {:error,
+         "no Claude credential source on this platform: the Keychain is macOS-only. " <>
+           "Set sandbox.credential_command to a command printing the credential JSON " <>
+           ~S|(e.g. `cat ~/.claude/.credentials.json`).|}
+    end
+  end
+
+  defp run_credential_command(command) do
+    case System.cmd("/bin/sh", ["-c", command], stderr_to_stdout: false) do
+      {out, 0} ->
+        case String.trim(out) do
+          "" -> {:error, "sandbox.credential_command produced nothing: #{command}"}
+          credential -> {:ok, credential}
+        end
+
+      _ ->
+        {:error,
+         "could not read the Claude credential — run `claude` and log in once, " <>
+           "or set sandbox.credential_command"}
     end
   rescue
-    _ -> {:error, "Keychain lookup is macOS-only; cannot forward a Claude credential from here"}
+    _ -> {:error, "could not run the credential command: #{command}"}
   end
 
   defp remote_home(sandbox) do

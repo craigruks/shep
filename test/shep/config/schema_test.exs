@@ -22,6 +22,11 @@ defmodule Shep.Config.SchemaTest do
       # branch and release the machine.
       assert get_in(config, ["sandbox", "keep_on_failure"]) == false
       assert get_in(config, ["sandbox", "remote_path"]) == "/vercel/sandbox/app"
+      # No credential source is assumed: macOS falls back to the Keychain,
+      # anywhere else must say where the credential lives.
+      assert get_in(config, ["sandbox", "credential_command"]) == nil
+      # An unattended deleter is opt-in; `just shep tidy` is always available.
+      assert get_in(config, ["workspace", "tidy_interval_ms"]) == 0
     end
 
     test "watchdog cadence defaults are present" do

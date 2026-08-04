@@ -6,7 +6,7 @@ defmodule Shep.Config.Schema do
     "workspace" => %{
       "root" => "~/code/shep_worktrees",
       "repo" => ".",
-      "tidy_interval_ms" => 3_600_000
+      "tidy_interval_ms" => 0
     },
     "goal" => %{
       "verify" => nil,

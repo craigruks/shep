@@ -167,17 +167,20 @@ post-mortem, or it was dirty and `Worktree.remove` refused. Boot only
 prunes registrations for directories already gone, so the rest piled up
 until someone noticed them in a UI.
 
-`Shep.Tidy` reclaims them, and the daemon runs it every
-`workspace.tidy_interval_ms` (default hourly, `0` disables) in a
-supervised Task — never inline, since it touches git and the network.
-`just shep tidy [--dry-run]` runs the same pass by hand.
+`Shep.Tidy` reclaims them. `just shep tidy [--dry-run]` runs a pass by
+hand; set `workspace.tidy_interval_ms` to have the daemon sweep on a
+timer (shipped default `0`, off — an unattended deleter is opt-in). The
+sweep runs in a supervised Task, never inline, since it touches git and
+the network.
 
 The rule is deliberately not "the issue looks finished": a label says
 what a tracker believes, not whether this directory holds the only copy
 of something. A worktree goes only when no task is running or paused in
 it, the tree is clean, and its HEAD is contained in some remote branch —
-pushed or merged. Decided from git alone. Everything else is reported
-and left. The same pass runs `Sandbox.sweep/2`, so both kinds of
+pushed or merged, and it belongs to this clone (flocks can share a
+worktree root). Decided from git alone. Everything else is reported and
+left. Note "clean" is git's definition: ignored files do not count, so a
+worktree holding only a hook-written `.env` is reclaimed. The same pass runs `Sandbox.sweep/2`, so both kinds of
 workspace are covered by one job.
 
 ## Pause/Resume
