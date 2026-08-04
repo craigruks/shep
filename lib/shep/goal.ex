@@ -116,29 +116,60 @@ defmodule Shep.Goal do
   end
 
   defp do_ci(final, repo, pr, task, ws, config, opid, attempt, max, run_turn) do
-    case Shep.CIWatch.watch(repo, pr, max_retries: 1) do
+    # The whole loop frame, threaded so a fix turn can resume it.
+    ctx = {final, repo, pr, task, ws, config, opid, attempt, max, run_turn}
+
+    case Shep.CIWatch.watch(repo, pr, watch_opts(config)) do
       :passed ->
         Logger.info("CI passed for task #{task.id}")
         Shep.Tracker.update_status(task.id, "in-review")
         final
 
+      # A conflicting PR gets no check suites at all, so this is a
+      # distinct failure with a distinct repair: merge the base branch.
+      {:conflict, detail} when attempt < max and task.agent == :claude ->
+        Logger.warning("PR for task #{task.id} conflicts, fix turn #{attempt + 1}/#{max}")
+        base = get_in(config, ["staging", "pr_target"]) || task.base_branch
+        fix_and_repush(ctx, fix_prompt(:conflict, attempt + 1, max, detail, base))
+
+      {:conflict, detail} ->
+        give_up(task, "PR unmergeable after #{attempt} fix attempts: #{detail}")
+
+      # Nothing ran, so nothing is verified. No fix turn can conjure a
+      # check run, and "in-review" would be a lie about this PR.
+      {:unverified, reason} ->
+        give_up(task, "CI never verified the PR: #{reason}")
+
       {:failed, reason} when attempt < max and task.agent == :claude ->
         Logger.warning("CI failed for task #{task.id}, fix turn #{attempt + 1}/#{max}: #{reason}")
         logs = Shep.CIWatch.failure_logs(repo, pr)
-        prompt = fix_prompt(:ci, attempt + 1, max, logs, nil)
-        _iteration = run_turn.(prompt)
-
-        case Shep.AgentRunner.PR.push_branch(task, ws) do
-          :ok ->
-            do_ci(final, repo, pr, task, ws, config, opid, attempt + 1, max, run_turn)
-
-          {:error, push_err} ->
-            give_up(task, "push failed during CI fix: #{tail(push_err, 300)}")
-        end
+        fix_and_repush(ctx, fix_prompt(:ci, attempt + 1, max, logs, nil))
 
       {:failed, reason} ->
         give_up(task, "CI failed after #{attempt} fix attempts: #{reason}")
     end
+  end
+
+  # One fix turn in the agent session, then re-push so CI runs again.
+  defp fix_and_repush(ctx, prompt) do
+    {final, repo, pr, task, ws, config, opid, attempt, max, run_turn} = ctx
+    _iteration = run_turn.(prompt)
+
+    case Shep.AgentRunner.PR.push_branch(task, ws) do
+      :ok ->
+        do_ci(final, repo, pr, task, ws, config, opid, attempt + 1, max, run_turn)
+
+      {:error, push_err} ->
+        give_up(task, "push failed during CI fix: #{tail(push_err, 300)}")
+    end
+  end
+
+  defp watch_opts(config) do
+    [
+      max_retries: 1,
+      grace_ms: get_in(config, ["goal", "ci_grace_ms"]) || 300_000,
+      required_checks: get_in(config, ["goal", "ci_required_checks"]) || []
+    ]
   end
 
   defp give_up(task, reason) do
@@ -165,8 +196,13 @@ defmodule Shep.Goal do
   end
 
   @doc "Build the prompt for a fix turn in the same agent session."
-  @spec fix_prompt(:verify | :ci, pos_integer(), pos_integer(), String.t(), String.t() | nil) ::
-          String.t()
+  @spec fix_prompt(
+          :verify | :ci | :conflict,
+          pos_integer(),
+          pos_integer(),
+          String.t(),
+          String.t() | nil
+        ) :: String.t()
   def fix_prompt(:verify, attempt, max, output, cmd) do
     """
     The verification command failed, so this task is not complete yet.
@@ -200,6 +236,26 @@ defmodule Shep.Goal do
     changes. Do NOT push or create pull requests; the orchestrator pushes
     and CI re-runs. If the failure is genuinely unfixable, emit a failed
     completion signal explaining why.
+    """
+  end
+
+  def fix_prompt(:conflict, attempt, max, detail, base) do
+    """
+    The pull request for this task conflicts with `#{base}` (#{detail}).
+    GitHub creates no check suites for a PR it cannot merge, so CI cannot
+    run at all until this is resolved. Fix attempt #{attempt} of #{max}.
+
+    In this worktree:
+
+    ```
+    git fetch origin #{base}
+    git merge origin/#{base}
+    ```
+
+    Resolve every conflict, preserving the intent of both sides, re-run the
+    project's checks locally, and commit the merge. Do NOT push or create
+    pull requests; the orchestrator pushes and CI re-runs. If the conflict
+    is genuinely unresolvable, emit a failed completion signal explaining why.
     """
   end
 end

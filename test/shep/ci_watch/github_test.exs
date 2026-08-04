@@ -5,79 +5,180 @@ defmodule Shep.CIWatch.GitHubTest do
 
   alias Shep.CIWatch.GitHub
 
+  @checks_args ["--json", "name,state,bucket,link"]
+  @actions_link "https://github.com/org/repo/actions/runs/123/job/456"
+
   defp stub_gh(fun) do
     Application.put_env(:shep, :gh_runner, fun)
     on_exit(fn -> Application.delete_env(:shep, :gh_runner) end)
   end
 
-  defp stub_checks(checks) do
-    stub_gh(fn ["pr", "checks", _pr, "--repo", _repo, "--json", "name,state,bucket"] ->
-      {:ok, Jason.encode!(checks)}
+  # The watch reads mergeability every poll, so a checks stub has to
+  # answer both calls.
+  defp stub_checks(checks, merge \\ %{"mergeable" => "MERGEABLE", "mergeStateStatus" => "CLEAN"}) do
+    stub_gh(fn
+      ["pr", "checks", _pr, "--repo", _repo | @checks_args] -> {:ok, Jason.encode!(checks)}
+      ["pr", "view", _pr, "--repo", _repo, "--json", _fields] -> {:ok, Jason.encode!(merge)}
     end)
   end
 
-  describe "poll_checks/2" do
-    test "all passed checks return :passed" do
-      stub_checks([
-        %{"name" => "Quality", "state" => "COMPLETED", "bucket" => "pass"},
-        %{"name" => "Build", "state" => "COMPLETED", "bucket" => "pass"}
-      ])
+  defp check(name, bucket, link \\ nil) do
+    %{"name" => name, "state" => "COMPLETED", "bucket" => bucket, "link" => link}
+  end
 
+  describe "poll_checks/3" do
+    test "a completed pass with nothing pending is :passed" do
+      stub_checks([check("Quality", "pass"), check("Build", "pass")])
       assert :passed == GitHub.poll_checks("org/repo", "7")
     end
 
     test "any failed check returns {:failed, name}" do
-      stub_checks([
-        %{"name" => "Quality", "state" => "COMPLETED", "bucket" => "pass"},
-        %{"name" => "Build", "state" => "COMPLETED", "bucket" => "fail"}
-      ])
-
+      stub_checks([check("Quality", "pass"), check("Build", "fail")])
       assert {:failed, "Build"} == GitHub.poll_checks("org/repo", "7")
     end
 
-    test "pending check returns :pending" do
-      stub_checks([
-        %{"name" => "Quality", "state" => "IN_PROGRESS", "bucket" => ""},
-        %{"name" => "Build", "state" => "COMPLETED", "bucket" => "pass"}
-      ])
-
-      assert :pending == GitHub.poll_checks("org/repo", "7")
+    test "a pending check alongside a real verdict is pending with evidence" do
+      stub_checks([check("Quality", ""), check("Build", "pass")])
+      assert {:pending, :evidence} == GitHub.poll_checks("org/repo", "7")
     end
 
-    test "empty checks returns :pending" do
+    test "empty checks are pending with no evidence, never passed" do
       stub_checks([])
-      assert :pending == GitHub.poll_checks("org/repo", "7")
+      assert {:pending, :no_evidence} == GitHub.poll_checks("org/repo", "7")
     end
 
-    test "skipping bucket treated as passed" do
+    test "skips alone are not evidence: the conflicted-PR shape is not :passed" do
+      # Exactly what a CONFLICTING PR shows: a skipped review bot and a
+      # queued third-party app. Zero failing, zero Actions runs.
       stub_checks([
-        %{"name" => "Test", "state" => "COMPLETED", "bucket" => "skipping"},
-        %{"name" => "Build", "state" => "COMPLETED", "bucket" => "pass"}
+        check("CodeRabbit", "skipping"),
+        check("some-app", "", "https://example.com/status/1")
       ])
 
+      assert {:pending, :no_evidence} == GitHub.poll_checks("org/repo", "7")
+    end
+
+    test "a skip beside a real pass is still :passed" do
+      stub_checks([check("Test", "skipping"), check("Build", "pass")])
       assert :passed == GitHub.poll_checks("org/repo", "7")
     end
 
-    test "check without bucket field treated as pending" do
+    test "a queued Actions run counts as evidence" do
+      stub_checks([check("Quality", "", @actions_link)])
+      assert {:pending, :evidence} == GitHub.poll_checks("org/repo", "7")
+    end
+
+    test "workflows that all skipped by path filter are green, not unverified" do
+      # Actions built the suite and every job skipped: that is a real
+      # verdict on this commit, unlike a third-party bot's skip.
+      stub_checks([check("docs-only", "skipping", @actions_link)])
+      assert :passed == GitHub.poll_checks("org/repo", "7")
+    end
+
+    test "check without bucket field is pending and, unlinked, not evidence" do
       stub_checks([%{"name" => "Test", "state" => "IN_PROGRESS"}])
-      assert :pending == GitHub.poll_checks("org/repo", "7")
+      assert {:pending, :no_evidence} == GitHub.poll_checks("org/repo", "7")
+    end
+
+    test "gh's no-checks error is absence, not a poll error" do
+      stub_gh(fn _args -> {:error, "no checks reported on the 'shep/7' branch"} end)
+      assert {:pending, :no_evidence} == GitHub.poll_checks("org/repo", "7")
     end
 
     test "gh failure returns {:error, reason}" do
       stub_gh(fn _args -> {:error, "boom"} end)
       assert {:error, "boom"} == GitHub.poll_checks("org/repo", "7")
     end
+
+    test "required checks must all have passed, whatever else is queued" do
+      stub_checks([check("quality", "pass"), check("coderabbit", "", @actions_link)])
+      opts = [required_checks: ["quality"]]
+      assert :passed == GitHub.poll_checks("org/repo", "7", opts)
+    end
+
+    test "a missing required check keeps the verdict pending" do
+      stub_checks([check("quality", "pass")])
+      opts = [required_checks: ["quality", "release-smoke"]]
+      assert {:pending, :evidence} == GitHub.poll_checks("org/repo", "7", opts)
+    end
+  end
+
+  describe "merge_state/2" do
+    test "CONFLICTING is a conflict" do
+      stub_checks([], %{"mergeable" => "CONFLICTING", "mergeStateStatus" => "DIRTY"})
+      assert {:conflict, detail} = GitHub.merge_state("org/repo", "7")
+      assert detail =~ "CONFLICTING"
+    end
+
+    test "a DIRTY merge state alone is a conflict" do
+      stub_checks([], %{"mergeable" => "UNKNOWN", "mergeStateStatus" => "DIRTY"})
+      assert {:conflict, _} = GitHub.merge_state("org/repo", "7")
+    end
+
+    test "MERGEABLE and UNKNOWN are both :ok" do
+      stub_checks([], %{"mergeable" => "MERGEABLE", "mergeStateStatus" => "CLEAN"})
+      assert :ok == GitHub.merge_state("org/repo", "7")
+
+      stub_checks([], %{"mergeable" => "UNKNOWN", "mergeStateStatus" => "UNKNOWN"})
+      assert :ok == GitHub.merge_state("org/repo", "7")
+    end
+
+    test "an unreadable answer never invents a conflict" do
+      stub_gh(fn _args -> {:error, "boom"} end)
+      assert :ok == GitHub.merge_state("org/repo", "7")
+
+      stub_gh(fn _args -> {:ok, "not json"} end)
+      assert :ok == GitHub.merge_state("org/repo", "7")
+    end
   end
 
   describe "watch/3" do
     test "returns :passed when the first poll is green" do
-      stub_checks([%{"name" => "Quality", "state" => "COMPLETED", "bucket" => "pass"}])
+      stub_checks([check("Quality", "pass")])
       assert :passed == GitHub.watch("org/repo", "7", max_retries: 1)
     end
 
     test "returns the failing check name when retries are exhausted" do
-      stub_checks([%{"name" => "Quality", "state" => "COMPLETED", "bucket" => "fail"}])
+      stub_checks([check("Quality", "fail")])
       assert {:failed, "Quality"} == GitHub.watch("org/repo", "7", max_retries: 1)
+    end
+
+    test "a conflicted PR short-circuits to {:conflict, _} without waiting for checks" do
+      stub_checks([], %{"mergeable" => "CONFLICTING", "mergeStateStatus" => "DIRTY"})
+
+      assert {:conflict, detail} =
+               GitHub.watch("org/repo", "7", max_retries: 1, grace_ms: 0)
+
+      assert detail =~ "CONFLICTING"
+    end
+
+    test "a PR that reports nothing settles as {:unverified, _}, never :passed" do
+      stub_checks([check("CodeRabbit", "skipping")])
+
+      assert {:unverified, reason} = GitHub.watch("org/repo", "7", max_retries: 1, grace_ms: 0)
+      assert reason =~ "no check reported"
+    end
+
+    test "the grace window is a wait, not an immediate verdict" do
+      # First poll sees nothing, the second sees a green run: the watch
+      # must ride out the grace window rather than settle on absence.
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      stub_gh(fn
+        ["pr", "view", _pr, "--repo", _repo, "--json", _fields] ->
+          {:ok, Jason.encode!(%{"mergeable" => "MERGEABLE", "mergeStateStatus" => "CLEAN"})}
+
+        ["pr", "checks", _pr, "--repo", _repo | @checks_args] ->
+          n = Agent.get_and_update(counter, &{&1, &1 + 1})
+          if n == 0, do: {:ok, "[]"}, else: {:ok, Jason.encode!([check("Quality", "pass")])}
+      end)
+
+      assert :passed ==
+               GitHub.watch("org/repo", "7",
+                 max_retries: 1,
+                 grace_ms: 60_000,
+                 poll_interval_ms: 1
+               )
     end
   end
 

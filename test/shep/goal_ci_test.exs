@@ -158,6 +158,59 @@ defmodule Shep.GoalCILoopTest do
     assert "failed" == Memory.get_status("ci-5")
   end
 
+  test "a conflicted PR runs a merge fix turn and re-pushes, then passes" do
+    CIWatchStub.install([{:conflict, "mergeable=CONFLICTING mergeStateStatus=DIRTY"}, :passed])
+    {wt, bare} = git_worktree_with_remote("shep/ci-7")
+    agent = stub_agent(wt, ~S(printf '%s\n' "$@" > fix_args.txt) <> "\necho merged")
+    final = %Complete{summary: "done"}
+    task = %Shep.Task{id: "ci-7", branch: "shep/ci-7", prompt: "p"}
+
+    conf =
+      config(agent, 2)
+      |> Map.put("staging", %{"pr_target" => "release-train"})
+
+    assert ^final = ci(final, @pr_url, task, wt, conf)
+
+    prompt = File.read!(Path.join(wt, "fix_args.txt"))
+    assert prompt =~ "conflicts with `release-train`"
+    assert prompt =~ "git merge origin/release-train"
+    assert {_, 0} = System.cmd("git", ["-C", bare, "rev-parse", "--verify", "refs/heads/shep/ci-7"])
+    assert "in-review" == Memory.get_status("ci-7")
+  end
+
+  test "a conflict that survives the fix turns fails the task, never in-review" do
+    CIWatchStub.install([
+      {:conflict, "mergeable=CONFLICTING"},
+      {:conflict, "mergeable=CONFLICTING"}
+    ])
+
+    {wt, _bare} = git_worktree_with_remote("shep/ci-8")
+    agent = stub_agent(wt, "echo tried a merge")
+    final = %Complete{summary: "done"}
+    task = %Shep.Task{id: "ci-8", branch: "shep/ci-8", prompt: "p"}
+
+    assert %Failed{reason: reason, recoverable: false} =
+             ci(final, @pr_url, task, wt, config(agent, 1))
+
+    assert reason =~ "PR unmergeable after 1 fix attempts"
+    assert "failed" == Memory.get_status("ci-8")
+  end
+
+  test "an unverified PR fails the task without burning a fix turn" do
+    CIWatchStub.install([{:unverified, "no check reported a verdict within 300s"}])
+    dir = tmp_dir("shep_ci_unverified")
+    agent = stub_agent(dir, "touch ci_fix.marker")
+    final = %Complete{summary: "done"}
+    task = %Shep.Task{id: "ci-9", branch: "shep/ci-9", prompt: "p"}
+
+    assert %Failed{reason: reason, recoverable: false} =
+             ci(final, @pr_url, task, dir, config(agent, 2))
+
+    assert reason =~ "CI never verified the PR"
+    refute File.exists?(Path.join(dir, "ci_fix.marker"))
+    assert "failed" == Memory.get_status("ci-9")
+  end
+
   test "no-merge tasks skip the CI watch entirely" do
     # An empty script means any watch/3 call would crash the stub.
     CIWatchStub.install([])
