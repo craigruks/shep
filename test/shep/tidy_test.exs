@@ -39,6 +39,12 @@ defmodule Shep.TidyTest do
     {base, repo}
   end
 
+  # Asked of git, exactly as production does, so symlinked temp paths
+  # (/var vs /private/var on macOS) compare equal on both sides.
+  defp common_dir(repo) do
+    repo |> git!(["rev-parse", "--path-format=absolute", "--git-common-dir"]) |> String.trim()
+  end
+
   defp worktree(repo, branch, root) do
     path = Path.join(root, String.replace(branch, "/", "_"))
     git!(repo, ["worktree", "add", "-q", "-b", branch, path, "HEAD"])
@@ -90,6 +96,23 @@ defmodule Shep.TidyTest do
 
       busy = MapSet.new([Path.expand(path)])
       assert %{decision: :busy} = Tidy.classify(path, busy)
+    end
+
+    # Flocks can share a worktree root; `git worktree remove` only works
+    # from the clone that owns the worktree, so another clone's is left be.
+    test "a worktree owned by another clone is reported, not reclaimed" do
+      {base, repo} = repo_with_remote()
+      root = Path.join(base, "worktrees")
+      File.mkdir_p!(root)
+      path = worktree(repo, "shep/5", root)
+      git!(path, ["push", "-q", "origin", "shep/5"])
+      git!(path, ["fetch", "-q", "origin"])
+
+      {_other_base, other_repo} = repo_with_remote()
+
+      assert %{decision: :foreign} = Tidy.classify(path, MapSet.new(), common_dir(other_repo))
+      # Owned by the clone that made it, so that daemon still reclaims it.
+      assert %{decision: :reap} = Tidy.classify(path, MapSet.new(), common_dir(repo))
     end
 
     test "a directory that is not a worktree is reported, not reclaimed" do

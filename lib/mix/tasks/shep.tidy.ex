@@ -43,6 +43,7 @@ defmodule Mix.Tasks.Shep.Tidy do
   defp mark(:busy), do: "busy "
   defp mark(:dirty), do: "keep "
   defp mark(:unpushed), do: "keep "
+  defp mark(:foreign), do: "other"
   defp mark(:unreadable), do: "skip "
 
   defp summarize(report, true) do

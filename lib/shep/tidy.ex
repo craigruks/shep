@@ -25,7 +25,7 @@ defmodule Shep.Tidy do
 
   require Logger
 
-  @type decision :: :reap | :busy | :dirty | :unpushed | :unreadable
+  @type decision :: :reap | :busy | :dirty | :unpushed | :foreign | :unreadable
 
   @type entry :: %{
           path: String.t(),
@@ -52,7 +52,10 @@ defmodule Shep.Tidy do
       if dry_run? do
         []
       else
-        entries |> Enum.filter(&(&1.decision == :reap)) |> Enum.map(&reclaim(&1, repo))
+        entries
+        |> Enum.filter(&(&1.decision == :reap))
+        |> Enum.map(&reclaim(&1, repo))
+        |> Enum.reject(&is_nil/1)
       end
 
     sandboxes = tidy_sandboxes(config, dry_run?)
@@ -83,15 +86,23 @@ defmodule Shep.Tidy do
 
       root
       |> Shep.Worktree.list()
-      |> Enum.map(&classify(&1, busy))
+      |> Enum.map(&classify(&1, busy, common_dir(repo)))
     else
       []
     end
   end
 
-  @doc "Whether a worktree holds anything that is not already on a remote."
-  @spec classify(String.t(), MapSet.t()) :: entry()
-  def classify(path, busy \\ MapSet.new()) do
+  @doc """
+  Whether a worktree holds anything that is not already on a remote.
+
+  `owner` is the git common dir of the clone this daemon manages. Flocks
+  can share a worktree root — Shep and another repo both pointing at
+  `~/code/shep_worktrees` — and `git worktree remove` only works from the
+  clone that owns the worktree, so anything belonging to a different one
+  is reported and left to its own daemon.
+  """
+  @spec classify(String.t(), MapSet.t(), String.t() | nil) :: entry()
+  def classify(path, busy \\ MapSet.new(), owner \\ nil) do
     cond do
       MapSet.member?(busy, Path.expand(path)) ->
         entry(path, :busy, "a live task owns it")
@@ -102,9 +113,33 @@ defmodule Shep.Tidy do
             entry(path, :unreadable, "not a readable git worktree")
 
           branch ->
-            classify_git(path, branch)
+            classify_owned(path, branch, owner)
         end
     end
+  end
+
+  defp classify_owned(path, branch, owner) do
+    if foreign?(path, owner) do
+      entry(path, :foreign, "belongs to another clone", branch)
+    else
+      classify_git(path, branch)
+    end
+  end
+
+  # nil owner means the caller did not scope the sweep (a bare classify/1
+  # in a test or an iex session), so ownership is not checked.
+  defp foreign?(_path, nil), do: false
+  defp foreign?(path, owner), do: common_dir(path) not in [nil, owner]
+
+  defp common_dir(path) do
+    case System.cmd("git", ["-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+           stderr_to_stdout: true
+         ) do
+      {out, 0} -> out |> String.trim() |> Path.expand()
+      _ -> nil
+    end
+  rescue
+    _ -> nil
   end
 
   defp classify_git(path, branch) do
