@@ -173,14 +173,21 @@ concurrency, timeouts, or the tracker while Shep is running. No restarts.
 tracker:   { kind: "github", repo: "you/your-repo" }
 workspace: { root: ~/code/shep_worktrees }
 agent:     { command: "claude", model: "opus", max_concurrent: 3, max_turns: 10 }
+sandbox:   { snapshot: "snap_…", timeout: "45m", keep_on_failure: false }
 goal:      { verify: "mix quality", verify_fixes: 2, ci_fixes: 2 }
 hooks:     { on_worktree_ready: "pnpm install --frozen-lockfile" }
 staging:   { base_branch: "staging", pr_target: "staging" }
 ```
 
 `agent.model` is the fleet default; a `shep:model:<name>` label on an issue
-beats it for that issue alone, and `just shep ps` reports the agent and model
-each running task is on.
+beats it for that issue alone, and `just shep ps` reports the agent, model, and
+location each running task is on.
+
+Two independent axes: **what** runs (`shep:codex`, `shep:model:…`) and **where**
+it runs (`shep:sandbox` → a Vercel sandbox instead of a local worktree). They
+compose. A sandbox task needs `sandbox.snapshot` set and the `sandbox` CLI
+authed; its checkout, agent session, and branch all live and die with the
+sandbox.
 
 ## Herded by Shep
 
@@ -259,6 +266,7 @@ labels and logs.
 | `shep:promoted` | shipped |
 | `shep:codex` | route this issue to Codex instead of Claude |
 | `shep:model:<name>` | run this issue on a specific model, overriding `agent.model` (works for Codex too) |
+| `shep:sandbox` | run this issue in a Vercel sandbox instead of a local git worktree |
 | `shep:no-merge` | open the PR but skip CI-watch / auto-merge labels |
 
 Dependencies work too: put `Depends on: #12, #45` in an issue body and Shep

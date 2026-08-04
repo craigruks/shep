@@ -17,6 +17,11 @@ defmodule Shep.Config.SchemaTest do
       assert get_in(config, ["agent", "max_concurrent"]) == 1
       assert get_in(config, ["agent", "command"]) == "claude"
       assert get_in(config, ["agent", "model"]) == "opus"
+      assert get_in(config, ["agent", "location"]) == "local"
+      # A metered sandbox is never kept by default; failures rescue the
+      # branch and release the machine.
+      assert get_in(config, ["sandbox", "keep_on_failure"]) == false
+      assert get_in(config, ["sandbox", "remote_path"]) == "/vercel/sandbox/app"
     end
 
     test "watchdog cadence defaults are present" do

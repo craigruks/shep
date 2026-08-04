@@ -7,12 +7,12 @@ defmodule Shep.AgentRunner.PR do
 
   require Logger
 
-  @doc "Push a branch to origin. Returns `:ok` or `{:error, output}`."
-  @spec push_branch(Shep.Task.t(), String.t()) :: :ok | {:error, String.t()}
-  def push_branch(task, cwd) do
-    case System.cmd("git", ["push", "origin", task.branch], cd: cwd, stderr_to_stdout: true) do
-      {_, 0} -> :ok
-      {err, _} -> {:error, err}
+  @doc "Push a branch to origin from the task's workspace."
+  @spec push_branch(Shep.Task.t(), Shep.Workspace.t()) :: :ok | {:error, String.t()}
+  def push_branch(task, %Shep.Workspace{} = workspace) do
+    case Shep.Workspace.git(workspace, ["push", "origin", task.branch]) do
+      {:ok, _} -> :ok
+      {:error, err} -> {:error, err}
     end
   end
 
@@ -21,29 +21,29 @@ defmodule Shep.AgentRunner.PR do
   `{:ok, url}`, `:none` (demo tasks, uncommitted changes, or a non-Complete
   completion), or `{:error, reason}`.
   """
-  @spec create(struct(), Shep.Task.t(), String.t(), map()) ::
+  @spec create(struct(), Shep.Task.t(), Shep.Workspace.t(), map()) ::
           {:ok, String.t()} | :none | {:error, String.t()}
-  def create(_completion, %{demo: true} = task, _path, _config) do
+  def create(_completion, %{demo: true} = task, _workspace, _config) do
     Logger.info("Demo task #{task.id}: skipping push and PR creation")
     :none
   end
 
-  def create(%Shep.Completion.Complete{summary: summary}, task, worktree_path, config) do
-    if Shep.Worktree.has_uncommitted_changes?(worktree_path) do
-      Logger.warning("Worktree has uncommitted changes, skipping PR")
+  def create(%Shep.Completion.Complete{summary: summary}, task, workspace, config) do
+    if Shep.Workspace.dirty?(workspace) do
+      Logger.warning("Workspace has uncommitted changes, skipping PR")
       :none
     else
-      push_and_pr(task, summary, config, worktree_path)
+      push_and_pr(task, summary, config, workspace)
     end
   end
 
-  def create(_completion, _task, _path, _config), do: :none
+  def create(_completion, _task, _workspace, _config), do: :none
 
-  defp push_and_pr(task, summary, config, cwd) do
+  defp push_and_pr(task, summary, config, workspace) do
     repo = get_in(config, ["tracker", "repo"])
     target = get_in(config, ["staging", "pr_target"]) || task.base_branch
 
-    case push_branch(task, cwd) do
+    case push_branch(task, workspace) do
       :ok ->
         label =
           if task.no_merge,

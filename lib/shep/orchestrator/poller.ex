@@ -204,8 +204,14 @@ defmodule Shep.Orchestrator.Poller do
   @spec kill_task(String.t(), struct()) :: :ok
   def kill_task(task_id, state) do
     case Map.get(state.running, task_id) do
-      %{pid: pid} -> Process.exit(pid, :kill)
-      nil -> :ok
+      %{pid: pid, task: task} ->
+        Process.exit(pid, :kill)
+        # The runner's own cleanup dies with the process, so a remote
+        # workspace has to be released here or it bills until its timeout.
+        Shep.Sandbox.release(task)
+
+      _ ->
+        :ok
     end
 
     :ok
@@ -248,8 +254,27 @@ defmodule Shep.Orchestrator.Poller do
         Shep.Worktree.prune(repo)
         Logger.info("Reconciled worktrees in #{root}")
       end
+
+      reconcile_sandboxes(config)
     end
 
     :ok
+  end
+
+  # Nothing is running at boot, so every sandbox this daemon could have
+  # created is an orphan a crash left billing. Skipped entirely unless
+  # sandboxes are configured, so the local-only path costs no CLI call.
+  defp reconcile_sandboxes(config) do
+    case get_in(config, ["sandbox", "snapshot"]) do
+      snapshot when is_binary(snapshot) and snapshot != "" ->
+        case Shep.Sandbox.sweep(config, []) do
+          {:ok, []} -> :ok
+          {:ok, names} -> Logger.info("Reaped #{length(names)} orphaned sandbox(es) at boot")
+          {:error, reason} -> Logger.warning("Could not reconcile sandboxes: #{reason}")
+        end
+
+      _ ->
+        :ok
+    end
   end
 end

@@ -4,6 +4,7 @@ defmodule Shep.AgentRunner do
   require Logger
 
   alias Shep.AgentRunner.Exec
+  alias Shep.Workspace
 
   @doc "Run a task end-to-end. Called inside a Task.Supervisor-spawned process."
   @spec run(Shep.Task.t(), pid(), map()) :: Shep.RunResult.t()
@@ -15,9 +16,10 @@ defmodule Shep.AgentRunner do
 
     :telemetry.execute([:shep, :agent, :start], %{}, %{task_id: task.id, task_type: task.type})
 
-    case resolve_worktree(task, opts, config) do
-      {:ok, worktree_path, resuming?} ->
-        Logger.info("Worktree ready for task #{task.id}: #{worktree_path}")
+    case resolve_workspace(task, opts, config) do
+      {:ok, workspace, resuming?} ->
+        where = Workspace.describe(workspace)
+        Logger.info("Workspace ready for task #{task.id}: #{where}")
 
         Logger.info(
           "agent phase: streaming to .shep/runs/#{task.id}.stdout.log; " <>
@@ -29,33 +31,35 @@ defmodule Shep.AgentRunner do
 
         send(
           orchestrator_pid,
-          {:agent_meta, task.id, %{worktree_path: worktree_path, session_name: session}}
+          {:agent_meta, task.id, %{worktree_path: where, session_name: session}}
         )
 
-        unless resuming?, do: run_hooks(config, worktree_path)
+        unless resuming?, do: Workspace.run_hook(workspace, config, "on_worktree_ready")
 
         iterations =
           if resuming? do
-            execute_resume_turns(worktree_path, task, orchestrator_pid, max_turns, config)
+            execute_resume_turns(workspace, task, orchestrator_pid, max_turns, config)
           else
-            prompt = Shep.PromptBuilder.build_expanded(task, worktree_path)
-            execute_turns(prompt, worktree_path, task, orchestrator_pid, max_turns, config)
+            prompt =
+              Shep.PromptBuilder.build_expanded(task, Workspace.prompt_cwd(workspace, config))
+
+            execute_turns(prompt, workspace, task, orchestrator_pid, max_turns, config)
           end
 
         final = resolve_completion(iterations)
-        run_turn = fn prompt -> fix_turn(prompt, worktree_path, task, config, orchestrator_pid) end
+        run_turn = fn prompt -> fix_turn(prompt, workspace, task, config, orchestrator_pid) end
 
         final =
-          Shep.Goal.verify_loop(final, task, worktree_path, config, orchestrator_pid, run_turn)
+          Shep.Goal.verify_loop(final, task, workspace, config, orchestrator_pid, run_turn)
 
         {final, pr_url} =
-          case Shep.AgentRunner.PR.create(final, task, worktree_path, config) do
+          case Shep.AgentRunner.PR.create(final, task, workspace, config) do
             {:ok, url} ->
               {Shep.Goal.ci_loop(
                  final,
                  url,
                  task,
-                 worktree_path,
+                 workspace,
                  config,
                  orchestrator_pid,
                  run_turn
@@ -73,14 +77,14 @@ defmodule Shep.AgentRunner do
                }, nil}
           end
 
-        cleanup_worktree(worktree_path, final, config)
+        Workspace.cleanup(workspace, task, final, config)
         duration = System.monotonic_time(:millisecond) - started_at
 
         result = %Shep.RunResult{
           iterations: iterations,
           completion: final,
           branch_name: task.branch,
-          worktree_path: worktree_path,
+          worktree_path: where,
           duration_ms: duration,
           pr_url: pr_url
         }
@@ -106,32 +110,27 @@ defmodule Shep.AgentRunner do
     end
   end
 
-  defp resolve_worktree(_task, %{resume_worktree: path}, _config) when is_binary(path) do
-    if File.dir?(path) do
-      {:ok, path, true}
-    else
-      {:error, "resume worktree not found: #{path}"}
-    end
-  end
-
-  defp resolve_worktree(task, _opts, config) do
-    root = get_in(config, ["workspace", "root"])
-    repo = get_in(config, ["workspace", "repo"]) || "."
-    File.mkdir_p!(root)
-
-    case Shep.Worktree.create(task.branch, task.base_branch, root, repo) do
-      {:ok, path} -> {:ok, path, false}
+  defp resolve_workspace(task, %{resume_worktree: path}, config) when is_binary(path) do
+    case Workspace.reattach(task, path, config) do
+      {:ok, workspace} -> {:ok, workspace, true}
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp execute_resume_turns(worktree_path, task, orchestrator_pid, max_turns, config) do
+  defp resolve_workspace(task, _opts, config) do
+    case Workspace.prepare(task, config) do
+      {:ok, workspace} -> {:ok, workspace, false}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp execute_resume_turns(workspace, task, orchestrator_pid, max_turns, config) do
     agent_cmd = agent_command(task.agent, config)
     args = Exec.agent_module(task.agent).build_resume_args(task.id, model_for(task, config))
     idle_ms = idle_timeout_ms(config)
 
     iteration =
-      run_single_turn_with_args(agent_cmd, args, worktree_path, task, orchestrator_pid, idle_ms)
+      run_single_turn_with_args(workspace, agent_cmd, args, task, orchestrator_pid, idle_ms)
 
     case iteration.completion do
       %Shep.Completion.Complete{} ->
@@ -141,23 +140,23 @@ defmodule Shep.AgentRunner do
         [iteration]
 
       _ ->
-        prompt = Shep.PromptBuilder.build_expanded(task, worktree_path)
+        prompt = Shep.PromptBuilder.build_expanded(task, Workspace.prompt_cwd(workspace, config))
 
         remaining =
-          execute_turns(prompt, worktree_path, task, orchestrator_pid, max_turns - 1, config)
+          execute_turns(prompt, workspace, task, orchestrator_pid, max_turns - 1, config)
 
         [iteration | remaining]
     end
   end
 
-  defp execute_turns(prompt, worktree_path, task, orchestrator_pid, max_turns, config) do
+  defp execute_turns(prompt, workspace, task, orchestrator_pid, max_turns, config) do
     agent_cmd = agent_command(task.agent, config)
     idle_ms = idle_timeout_ms(config)
     model = model_for(task, config)
 
     do_turns(
       prompt,
-      worktree_path,
+      workspace,
       task,
       orchestrator_pid,
       {agent_cmd, model, idle_ms},
@@ -171,27 +170,27 @@ defmodule Shep.AgentRunner do
     Enum.reverse(acc)
   end
 
-  defp do_turns(prompt, path, task, orchestrator_pid, {cmd, model, idle_ms} = agent, max, turn, acc) do
-    iteration = run_single_turn(cmd, model, prompt, path, task, orchestrator_pid, idle_ms)
+  defp do_turns(prompt, ws, task, orchestrator_pid, {cmd, model, idle_ms} = agent, max, turn, acc) do
+    iteration = run_single_turn(cmd, model, prompt, ws, task, orchestrator_pid, idle_ms)
     new_acc = [iteration | acc]
 
     case iteration.completion do
       %Shep.Completion.Complete{} -> Enum.reverse(new_acc)
       %Shep.Completion.Failed{} -> Enum.reverse(new_acc)
       _ when turn >= max -> Enum.reverse(new_acc)
-      _ -> do_turns(prompt, path, task, orchestrator_pid, agent, max, turn + 1, new_acc)
+      _ -> do_turns(prompt, ws, task, orchestrator_pid, agent, max, turn + 1, new_acc)
     end
   end
 
-  defp run_single_turn(agent_cmd, model, prompt, cwd, task, orchestrator_pid, idle_ms) do
+  defp run_single_turn(agent_cmd, model, prompt, workspace, task, orchestrator_pid, idle_ms) do
     args = Exec.agent_module(task.agent).build_args(prompt, task.id, model)
-    run_single_turn_with_args(agent_cmd, args, cwd, task, orchestrator_pid, idle_ms)
+    run_single_turn_with_args(workspace, agent_cmd, args, task, orchestrator_pid, idle_ms)
   end
 
-  defp run_single_turn_with_args(agent_cmd, args, cwd, task, orchestrator_pid, idle_ms) do
-    case Exec.resolve_executable(agent_cmd) do
-      nil -> Exec.executable_not_found(agent_cmd)
-      exe -> Exec.run(exe, args, cwd, task, orchestrator_pid, idle_ms)
+  defp run_single_turn_with_args(workspace, agent_cmd, args, task, orchestrator_pid, idle_ms) do
+    case Workspace.agent_spec(workspace, agent_cmd, args) do
+      {:ok, exe, argv, cwd} -> Exec.run(exe, argv, cwd, task, orchestrator_pid, idle_ms)
+      {:error, missing} -> Exec.executable_not_found(missing)
     end
   end
 
@@ -221,10 +220,6 @@ defmodule Shep.AgentRunner do
     get_in(config, ["agent", "command"]) || "claude"
   end
 
-  defp run_hooks(config, worktree_path) do
-    Shep.Hooks.run_lifecycle(config, "on_worktree_ready", worktree_path)
-  end
-
   defp resolve_completion([]),
     do: %Shep.Completion.Failed{reason: "no iterations", recoverable: false}
 
@@ -239,22 +234,11 @@ defmodule Shep.AgentRunner do
   end
 
   @doc "Run a single fix turn: continue the agent session with a new prompt."
-  @spec fix_turn(String.t(), String.t(), Shep.Task.t(), map(), pid()) :: Shep.IterationResult.t()
-  def fix_turn(prompt, wt, task, config, opid) do
+  @spec fix_turn(String.t(), Workspace.t(), Shep.Task.t(), map(), pid()) ::
+          Shep.IterationResult.t()
+  def fix_turn(prompt, workspace, task, config, opid) do
     agent_cmd = agent_command(task.agent, config)
     args = Shep.AgentRunner.Claude.build_continue_args(prompt, task.id, model_for(task, config))
-    run_single_turn_with_args(agent_cmd, args, wt, task, opid, idle_timeout_ms(config))
-  end
-
-  defp cleanup_worktree(path, completion, config) do
-    repo = get_in(config, ["workspace", "repo"]) || "."
-
-    case completion do
-      %Shep.Completion.Failed{} ->
-        Logger.info("Preserving worktree for failed task: #{path}")
-
-      _ ->
-        Shep.Worktree.remove(path, repo)
-    end
+    run_single_turn_with_args(workspace, agent_cmd, args, task, opid, idle_timeout_ms(config))
   end
 end

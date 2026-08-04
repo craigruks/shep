@@ -5,12 +5,14 @@ defmodule Shep.GoalTest do
 
   describe "run_verify/2" do
     test "passing command returns ok with output" do
-      assert {:ok, out} = Goal.run_verify("echo all green", System.tmp_dir!())
+      assert {:ok, out} = Goal.run_verify("echo all green", Shep.Workspace.local(System.tmp_dir!()))
       assert out =~ "all green"
     end
 
     test "failing command returns error with output" do
-      assert {:error, out} = Goal.run_verify("echo boom; exit 1", System.tmp_dir!())
+      assert {:error, out} =
+               Goal.run_verify("echo boom; exit 1", Shep.Workspace.local(System.tmp_dir!()))
+
       assert out =~ "boom"
     end
   end

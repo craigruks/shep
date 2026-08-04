@@ -12,7 +12,8 @@ defmodule Shep do
       prompt_args: Map.get(attrs, :prompt_args, %{}),
       type: Map.get(attrs, :type),
       depends_on: Map.get(attrs, :depends_on),
-      model: Map.get(attrs, :model)
+      model: Map.get(attrs, :model),
+      location: Map.get(attrs, :location, :local)
     }
 
     Shep.Orchestrator.submit(task)

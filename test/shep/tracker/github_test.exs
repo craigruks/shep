@@ -81,6 +81,22 @@ defmodule Shep.Tracker.GitHubTest do
     end
   end
 
+  describe "parse_location/1" do
+    test "shep:sandbox selects the vercel location" do
+      assert :vercel == GitHub.parse_location([%{"name" => "shep"}, %{"name" => "shep:sandbox"}])
+    end
+
+    test "nil without the label, so the config default decides" do
+      assert nil == GitHub.parse_location([%{"name" => "shep"}, %{"name" => "type:lint-fix"}])
+      assert nil == GitHub.parse_location([])
+    end
+
+    test "a lookalike label does not select a sandbox" do
+      assert nil == GitHub.parse_location([%{"name" => "sandbox"}])
+      assert nil == GitHub.parse_location([%{"name" => "shep:sandboxes"}])
+    end
+  end
+
   describe "parse_depends_on/1" do
     test "parses single dependency" do
       body = "Fix the bug\n\nDepends on: #42"

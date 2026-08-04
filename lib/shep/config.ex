@@ -24,6 +24,20 @@ defmodule Shep.Config do
     end
   end
 
+  @doc """
+  The configured default execution location for tasks.
+
+  Mapped explicitly rather than converted, so a typo in WORKFLOW.md can
+  never mint an atom or select a location that does not exist.
+  """
+  @spec location(map()) :: Shep.Task.location()
+  def location(config) do
+    case get_in(config, ["agent", "location"]) do
+      "vercel" -> :vercel
+      _ -> :local
+    end
+  end
+
   @doc "Force an immediate reload."
   @spec force_reload() :: {:ok, map()} | {:error, String.t()}
   def force_reload do
