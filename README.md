@@ -99,7 +99,10 @@ One `Task.Supervisor` child per issue. Each agent gets:
 1. **A claim.** The label flips to `shep:in-progress` so no one
    double-dispatches.
 2. **A worktree.** A fresh branch `shep/<issue>` off your base branch, deps
-   installed via your `on_worktree_ready` hook.
+   installed via your `on_worktree_ready` hook. That hook is a gate: if it
+   exits non-zero or times out the task fails before the first turn and is
+   retried, rather than briefing an agent into a broken checkout. Chain hook
+   commands with `&&`, not `;`, or the exit code never reaches Shep.
 3. **A briefing.** A prompt template picked by issue type (`type:test-fix`,
    `type:lint-fix`, …) with `` !`shell` `` expansion and `{{VAR}}`
    substitution.

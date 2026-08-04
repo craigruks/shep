@@ -32,5 +32,19 @@ defmodule Shep.HooksTest do
       config = %{"hooks" => %{"on_worktree_ready" => nil}}
       assert :ok = Hooks.run_lifecycle(config, "on_worktree_ready", System.tmp_dir!())
     end
+
+    test "propagates a non-zero exit instead of reporting :ok" do
+      config = %{"hooks" => %{"on_worktree_ready" => "exit 3", "hook_timeout_ms" => 5000}}
+
+      assert {:error, "hook exited 3"} =
+               Hooks.run_lifecycle(config, "on_worktree_ready", System.tmp_dir!())
+    end
+
+    test "propagates a timeout instead of reporting :ok" do
+      config = %{"hooks" => %{"on_worktree_ready" => "sleep 10", "hook_timeout_ms" => 100}}
+
+      assert {:error, "hook timed out"} =
+               Hooks.run_lifecycle(config, "on_worktree_ready", System.tmp_dir!())
+    end
   end
 end

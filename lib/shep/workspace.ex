@@ -217,8 +217,13 @@ defmodule Shep.Workspace do
 
   def prompt_cwd(%__MODULE__{path: path}, _config), do: path
 
-  @doc "Run the configured lifecycle hook inside the workspace."
-  @spec run_hook(t(), map(), String.t()) :: :ok
+  @doc """
+  Run the configured lifecycle hook inside the workspace.
+
+  Returns the hook's verdict so the caller can gate on it; an unconfigured
+  hook is `:ok`.
+  """
+  @spec run_hook(t(), map(), String.t()) :: :ok | {:error, String.t()}
   def run_hook(%__MODULE__{location: :vercel} = workspace, config, event) do
     case get_in(config, ["hooks", event]) do
       command when is_binary(command) and command != "" ->
@@ -228,9 +233,8 @@ defmodule Shep.Workspace do
 
           {:error, out} ->
             Logger.warning("Hook #{event} failed in sandbox: #{Shep.Goal.tail(out, 400)}")
+            {:error, "hook failed: #{Shep.Goal.tail(out, 200)}"}
         end
-
-        :ok
 
       _ ->
         :ok
