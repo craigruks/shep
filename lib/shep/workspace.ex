@@ -163,7 +163,11 @@ defmodule Shep.Workspace do
   end
 
   def shell(%__MODULE__{path: path}, command) do
-    case System.cmd("/bin/sh", ["-c", command], cd: path, stderr_to_stdout: true) do
+    case System.cmd("/bin/sh", ["-c", command],
+           cd: path,
+           stderr_to_stdout: true,
+           env: Shep.Env.unset()
+         ) do
       {out, 0} -> {:ok, out}
       {out, _code} -> {:error, out}
     end
