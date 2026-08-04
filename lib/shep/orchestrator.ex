@@ -69,9 +69,10 @@ defmodule Shep.Orchestrator do
   def terminate(reason, state) do
     Logger.info("Orchestrator shutting down: #{inspect(reason)}")
 
-    for {task_id, %{pid: pid, task: task}} <- state.running do
+    for {task_id, %{pid: pid, task: task} = entry} <- state.running do
       Logger.info("Draining agent: #{task_id}")
       Process.exit(pid, :shutdown)
+      Shep.AgentRunner.Exec.terminate(Map.get(entry, :os_pid))
       Shep.Sandbox.release(task)
     end
 
@@ -98,6 +99,7 @@ defmodule Shep.Orchestrator do
       %{pid: pid} = entry ->
         Poller.cancel_watchdog(entry)
         Process.exit(pid, :kill)
+        Shep.AgentRunner.Exec.terminate(Map.get(entry, :os_pid))
         Shep.Sandbox.release(entry.task)
         running = Map.delete(state.running, task_id)
         state = Dispatch.clean_retry(task_id, %{state | running: running})
@@ -126,8 +128,12 @@ defmodule Shep.Orchestrator do
 
         Poller.cancel_watchdog(entry)
         Process.exit(entry.pid, :shutdown)
+        # The Task dying does not stop the agent; without this it keeps
+        # writing to the worktree the operator was just handed.
+        Shep.AgentRunner.Exec.terminate(Map.get(entry, :os_pid))
+        Shep.Sandbox.release(entry.task)
 
-        Logger.info("Paused task #{task_id}")
+        Logger.info("Paused task #{task_id} (agent stopped)")
 
         {:reply,
          {:ok,

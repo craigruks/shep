@@ -204,8 +204,11 @@ defmodule Shep.Orchestrator.Poller do
   @spec kill_task(String.t(), struct()) :: :ok
   def kill_task(task_id, state) do
     case Map.get(state.running, task_id) do
-      %{pid: pid, task: task} ->
+      %{pid: pid, task: task} = entry ->
         Process.exit(pid, :kill)
+        # Neither the Task's death nor closing its Port signals the agent,
+        # so the OS process is stopped explicitly.
+        Shep.AgentRunner.Exec.terminate(Map.get(entry, :os_pid))
         # The runner's own cleanup dies with the process, so a remote
         # workspace has to be released here or it bills until its timeout.
         Shep.Sandbox.release(task)
