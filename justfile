@@ -86,11 +86,26 @@ shep cmd id="":
         echo "Shep is already awake (pid $("$BIN" pid))"
         exit 0
       fi
+      # Rotate by SIZE, not per start: diagnosing a failure means fixing
+      # something and restarting, so a per-start rotation would file away
+      # the exact session you were part-way through reading. Appending
+      # keeps consecutive boots in one file; the `=== shep` banner each
+      # boot writes marks the boundaries. Only when the file passes 8 MiB
+      # does it shift down (.log → .log.1 → .log.2, older dropped).
+      LOG=".shep/orchestrator.log"
+      MAX_BYTES=$((8 * 1024 * 1024))
+      if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt "$MAX_BYTES" ]; then
+        if [ -f "$LOG.1" ]; then mv -f "$LOG.1" "$LOG.2"; fi
+        mv -f "$LOG" "$LOG.1"
+        echo "Rotated $LOG (> $((MAX_BYTES / 1024 / 1024))MiB) → $LOG.1"
+      fi
       # `start` (not `daemon`) so logs land in .shep/orchestrator.log — the
-      # surface `just shep view` and the handler playbook tail. nohup detaches
-      # it; `bin/shep stop` later tears the VM down gracefully (:init.stop),
-      # draining agents instead of the old kill -9 that orphaned Ports.
-      nohup "$BIN" start > .shep/orchestrator.log 2>&1 &
+      # surface `just shep view` and the handler playbook tail. `>>` so a
+      # restart continues the file instead of destroying the record of why
+      # the last run failed. nohup detaches it; `bin/shep stop` later tears
+      # the VM down gracefully (:init.stop), draining agents instead of the
+      # old kill -9 that orphaned Ports.
+      nohup "$BIN" start >> "$LOG" 2>&1 &
       sleep 2
       if PID=$("$BIN" pid 2>/dev/null); then
         echo "Shep is awake (pid $PID)"
@@ -212,7 +227,7 @@ shep cmd id="":
             done; \
             sleep 2; \
           done ) & \
-        echo \"=== Orchestrator ==\" && tail -f $LOG \
+        echo \"=== Orchestrator ==\" && tail -F $LOG \
       '"
       # Re-layout on terminal resize
       tmux set-hook -t shep client-resized \
