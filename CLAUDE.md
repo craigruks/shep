@@ -81,7 +81,11 @@ the shepherd steps onto the field, works the session interactively,
 then sends Shep back out.
 
 The daemon is a `mix release`: `just shep build` produces `bin/shep`, and
-the lifecycle recipes drive it (`bin/shep start|stop|restart|pid|remote`).
+the lifecycle recipes drive it (`bin/shep start|stop|pid|remote`).
+`down` waits for the node to actually exit before returning, and
+`restart` stops and starts the OS process rather than calling
+`bin/shep restart` — that one restarts the application *inside* the
+running VM, so a freshly built release would never be loaded.
 `up` backgrounds `bin/shep start` (logs still land in
 `.shep/orchestrator.log`, appended — a restart continues the file
 instead of destroying the record of why the last run failed; each boot
