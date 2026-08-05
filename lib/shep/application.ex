@@ -5,6 +5,7 @@ defmodule Shep.Application do
 
   @impl true
   def start(_type, _args) do
+    Shep.Banner.log()
     Shep.RunLogger.attach()
 
     children = [
