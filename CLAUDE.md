@@ -81,9 +81,17 @@ the shepherd steps onto the field, works the session interactively,
 then sends Shep back out.
 
 The daemon is a `mix release`: `just shep build` produces `bin/shep`, and
-the lifecycle recipes drive it (`bin/shep start|stop|restart|pid|remote`).
+the lifecycle recipes drive it (`bin/shep start|stop|pid|remote`).
+`down` waits for the node to actually exit before returning, and
+`restart` stops and starts the OS process rather than calling
+`bin/shep restart` — that one restarts the application *inside* the
+running VM, so a freshly built release would never be loaded.
 `up` backgrounds `bin/shep start` (logs still land in
-`.shep/orchestrator.log`); `down` is a graceful `bin/shep stop`
+`.shep/orchestrator.log`, appended — a restart continues the file
+instead of destroying the record of why the last run failed; each boot
+opens with a `=== shep <version> up | pid … | workflow …` banner, and
+the file shifts down to `.log.1`/`.log.2` only once it passes 8 MiB);
+`down` is a graceful `bin/shep stop`
 (`:init.stop` drains the supervision tree — no more `kill -9` orphaning
 agent Ports or leaving worktree locks). The same tarball ships ERTS, so it
 runs with no Elixir installed; a `v*` tag push publishes per-platform
@@ -230,7 +238,9 @@ Playbook:
   compiled release, not source), then `SHEP_WORKFLOW=<path> just shep up`,
   then monitor
   `.shep/orchestrator.log` with a FILTERED tail (verdict lines, not
-  per-poll noise). That one tail now covers both milestones and
+  per-poll noise). The file spans sessions —
+  `grep '=== shep' .shep/orchestrator.log` lists the boot boundaries, so
+  the evidence of the run you just restarted away from is still there. That one tail now covers both milestones and
   liveness: each dispatch logs the phase contract, and a quiet agent
   emits gap-triggered "task N alive: agent quiet …" heartbeats every
   ~30s. A separate external stall detector on the runs log is no longer
