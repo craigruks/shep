@@ -56,6 +56,27 @@ shep cmd id="":
 
   need_id() { if [ -z "{{id}}" ]; then echo "Usage: just shep $CMD <id>"; exit 1; fi; }
 
+  # `bin/shep stop` only *requests* the shutdown: :init.stop drains, and
+  # agents get up to 30s to wind down. It returns while the node is still
+  # up, so a following `up` would find the old pid and no-op — you would
+  # think you had restarted and still be watching the old build.
+  wait_for_stop() {
+    WAITED=0
+    while "$BIN" pid >/dev/null 2>&1; do
+      if [ "$WAITED" -ge 40 ]; then
+        echo "Shep is still draining after ${WAITED}s (pid $("$BIN" pid 2>/dev/null))" >&2
+        echo "  it holds the node name, so 'just shep up' will not start a new one" >&2
+        return 1
+      fi
+      sleep 1
+      WAITED=$((WAITED + 1))
+      if [ "$WAITED" = 5 ]; then echo "  draining agents…"; fi
+    done
+    # Explicit: the loop's exit status is that of its last command, which
+    # would otherwise leak a stray non-zero out of the function.
+    return 0
+  }
+
   # The built release is the shipped artifact; `just shep build` produces it.
   BIN="_build/prod/rel/shep/bin/shep"
   need_release() {
@@ -117,14 +138,31 @@ shep cmd id="":
       ;;
     down)
       if [ -x "$BIN" ] && "$BIN" pid >/dev/null 2>&1; then
-        "$BIN" stop && echo "Shep is resting"
+        # `stop` only *requests* the shutdown: :init.stop drains, and the
+        # orchestrator's child spec allows 30s for agents to wind down. It
+        # returns while the node is still up, so a following `up` used to
+        # find the old pid and no-op — you thought you had restarted, and
+        # were still watching the old build. Wait for the node to actually
+        # go, a little past the drain budget.
+        "$BIN" stop || true
+        wait_for_stop || exit 1
+        echo "Shep is resting"
       else
         echo "Orchestrator not running"
       fi
       ;;
     restart)
       need_release
-      "$BIN" restart && echo "Shep restarted"
+      # NOT `bin/shep restart`: that restarts the application *inside the
+      # same OS process*, so a freshly built release is never loaded — the
+      # pid does not even change. Since `just shep build` is the step
+      # before this one nine times out of ten, restart means stop, wait,
+      # and start the new binary.
+      if "$BIN" pid >/dev/null 2>&1; then
+        "$BIN" stop || true
+        wait_for_stop || exit 1
+      fi
+      {{just_executable()}} --justfile "{{justfile()}}" shep up
       ;;
     console)
       need_release
