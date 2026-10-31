@@ -29,6 +29,24 @@ defmodule Shep.Tracker.GitHub do
     "promoted" => @label_promoted
   }
 
+  @doc """
+  Every label Shep itself applies or removes: the state machine plus
+  `shep:no-merge`. `gh issue edit --add-label` fails on a label the repo
+  lacks, so each must exist before the first dispatch.
+  """
+  @spec machine_labels() :: [String.t()]
+  def machine_labels do
+    [@label_queued | Map.values(@status_labels)] ++ [@label_no_merge]
+  end
+
+  @doc "The prefix of a per-issue model override label."
+  @spec model_label_prefix() :: String.t()
+  def model_label_prefix, do: @label_model
+
+  @doc "Whether `value` (the part after `shep:model:`) is a plausible model name."
+  @spec valid_model?(String.t()) :: boolean()
+  def valid_model?(value) when is_binary(value), do: Regex.match?(@model_pattern, value)
+
   @impl true
   def fetch_candidates do
     config = Shep.Config.current!()
@@ -186,7 +204,7 @@ defmodule Shep.Tracker.GitHub do
   end
 
   defp valid_model(value) do
-    if Regex.match?(@model_pattern, value) do
+    if valid_model?(value) do
       value
     else
       Logger.warning("ignoring malformed #{@label_model} label value: #{inspect(value)}")
