@@ -29,6 +29,15 @@ defmodule Shep.ConfigTest do
     assert get_in(config, ["agent", "command"]) == "claude"
   end
 
+  test "load/1 reads and validates a workflow with no server running" do
+    path = tmp_workflow()
+    write_workflow(path, 4321)
+
+    assert {:ok, config} = Shep.Config.load(path)
+    assert get_in(config, ["polling", "interval_ms"]) == 4321
+    assert {:error, "cannot read " <> _} = Shep.Config.load("/nonexistent/WORKFLOW.md")
+  end
+
   test "a missing workflow file boots with pure defaults" do
     pid = start_supervised!({Shep.Config, path: "/nonexistent/WORKFLOW.md", name: :cfg_miss_test})
 
