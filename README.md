@@ -102,7 +102,7 @@ never met your bugs.
         │ labels move:          │ retry w/ backoff           │
         │ shep:in-progress      │ idle watchdog              │
         │ shep:in-review  ◄─────┴──── CI passed ◄────────────┘
-        │ shep:failed     ◄────────── CI failed (fix turns + Slack)
+        │ shep:failed     ◄────────── agent, verify or CI failed (comment + Slack)
 ```
 
 One `Task.Supervisor` child per issue. Each agent gets:
@@ -124,8 +124,11 @@ One `Task.Supervisor` child per issue. Each agent gets:
    in the worktree; failures go back to the same session for a fix turn
    before any PR exists. Once the PR is up, red CI sends the failing
    check logs back to the session, the fix gets pushed, CI re-runs.
-   Attempts are capped; exhaustion means `shep:failed`, a preserved
-   worktree, and a Slack ping.
+   Attempts are capped; exhaustion (or an agent that fails outright)
+   means `shep:failed`, a preserved worktree, a Slack ping, and a comment
+   on the issue with the reason and the last ~30 lines of the output that
+   ended the task, collapsed and redacted (anything token-shaped becomes
+   `[REDACTED]`, since the comment is public).
 
    Green means a check actually reported, never "nothing is failing":
    GitHub builds no check suites for a PR it cannot merge, so a
@@ -399,7 +402,7 @@ labels and logs.
 | `shep:in-progress` | claimed, agent running |
 | `shep:pr-created` | branch pushed, PR open |
 | `shep:in-review` | CI green; a human should look |
-| `shep:failed` | goal not reached after capped fix attempts; reason posted as a comment |
+| `shep:failed` | goal not reached: verify or CI fix attempts exhausted, or the agent failed; reason and redacted output tail posted as a comment |
 | `shep:promoted` | shipped |
 | `shep:codex` | route this issue to Codex instead of Claude |
 | `shep:model:<name>` | run this issue on a specific model, overriding `agent.model` (works for Codex too) |
