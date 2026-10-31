@@ -249,6 +249,13 @@ defmodule Shep.Orchestrator do
   end
 
   @impl true
+  def handle_info({:agent_step, task_id, step}, state) do
+    new_state = Dispatch.record_step(task_id, step, state)
+    Snapshot.write(new_state)
+    {:noreply, new_state}
+  end
+
+  @impl true
   def handle_info({:agent_output, task_id, _line}, state) do
     case Map.get(state.running, task_id) do
       nil ->

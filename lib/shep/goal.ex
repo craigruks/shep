@@ -42,6 +42,7 @@ defmodule Shep.Goal do
 
       verify_cmd ->
         max = get_in(config, ["goal", "verify_fixes"]) || 2
+        step(orchestrator_pid, task, "verify")
 
         do_verify(
           final,
@@ -69,6 +70,7 @@ defmodule Shep.Goal do
 
       {:error, out} when attempt < max ->
         Logger.warning("Verify failed for task #{task.id}, fix turn #{attempt + 1}/#{max}")
+        step(opid, task, "verify #{attempt + 1}/#{max}")
         prompt = fix_prompt(:verify, attempt + 1, max, out, verify_cmd)
         iteration = run_turn.(prompt)
 
@@ -112,6 +114,7 @@ defmodule Shep.Goal do
     repo = get_in(config, ["tracker", "repo"])
     pr_number = pr_url |> String.split("/") |> List.last()
     max = get_in(config, ["goal", "ci_fixes"]) || 2
+    step(opid, task, "ci_wait")
     do_ci(final, repo, pr_number, task, ws, config, opid, 0, max, run_turn)
   end
 
@@ -153,16 +156,23 @@ defmodule Shep.Goal do
   # One fix turn in the agent session, then re-push so CI runs again.
   defp fix_and_repush(ctx, prompt) do
     {final, repo, pr, task, ws, config, opid, attempt, max, run_turn} = ctx
+    round = "#{attempt + 1}/#{max}"
+    step(opid, task, "ci_fix #{round}")
     _iteration = run_turn.(prompt)
 
     case Shep.AgentRunner.PR.push_branch(task, ws) do
       :ok ->
+        step(opid, task, "ci_wait #{round}")
         do_ci(final, repo, pr, task, ws, config, opid, attempt + 1, max, run_turn)
 
       {:error, push_err} ->
         give_up(task, "push failed during CI fix: #{tail(push_err, 300)}")
     end
   end
+
+  # Which step the task is in, for `just shep ps`. The suffix is the fix
+  # round (`verify 2/2` = the last allowed verify fix), absent before one.
+  defp step(opid, task, name), do: send(opid, {:agent_step, task.id, name})
 
   defp watch_opts(config) do
     [

@@ -6,7 +6,9 @@ defmodule Mix.Tasks.Shep.StatusTest do
 
   test "project passes daemon-computed deltas through verbatim" do
     snapshot = %{
-      running: %{"s1" => %{task_type: "custom", elapsed_ms: 1234, idle_ms: 42}},
+      running: %{
+        "s1" => %{task_type: "custom", elapsed_ms: 1234, elapsed: "1s", idle_ms: 42, step: "agent"}
+      },
       paused: %{},
       claimed: []
     }
@@ -18,6 +20,8 @@ defmodule Mix.Tasks.Shep.StatusTest do
              agent: :claude,
              location: :local,
              model: nil,
+             step: "agent",
+             elapsed: "1s",
              elapsed_ms: 1234,
              idle_ms: 42
            }

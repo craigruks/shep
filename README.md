@@ -207,6 +207,24 @@ staging:   { base_branch: "staging", pr_target: "staging" }
 beats it for that issue alone, and `just shep ps` reports the agent, model, and
 location each running task is on.
 
+`just shep ps` also says how long each running task has been at it and what
+it is doing right now, so with three tasks in flight you can see which one
+is stuck:
+
+```json
+"99": { "step": "verify 2/2", "elapsed": "12m 04s", "elapsed_ms": 724113, "idle_ms": 3020, ... }
+```
+
+- `elapsed`: time since the task was claimed (`45s`, `12m 04s`, `1h 02m 03s`).
+- `step`: `hook` (`on_worktree_ready`), `agent`, `verify`, `ci_wait` or
+  `ci_fix`. Once a fix round starts, the round rides along: `verify 2/2` is
+  the last fix the verify loop allows, `ci_wait 1/2` is CI re-running after
+  the first CI fix. `null` until the workspace is ready.
+
+Every step change also lands in `.shep/orchestrator.log` as
+`task 99 step: verify 2/2 (elapsed 12m 04s)`, which is how it reaches the
+orchestrator pane of `just shep view`.
+
 Two independent axes: **what** runs (`shep:codex`, `shep:model:…`) and **where**
 it runs (`shep:sandbox` → a Vercel sandbox instead of a local worktree). They
 compose. Read [Running agents in a sandbox](#running-agents-in-a-sandbox-experimental)
@@ -351,7 +369,7 @@ happier. We know which one that is.
 | `just shep down` | `just shep rest` | stop it |
 | `just shep run 42` | `just shep fetch 42` | dispatch an agent on issue 42 |
 | `just shep queue` | `just shep pen` | list templates + queued candidates |
-| `just shep ps` | `just shep flock` | status JSON: running, paused, claimed |
+| `just shep ps` | `just shep flock` | status JSON: running (with step + elapsed), paused, claimed |
 | `just shep pause 42` | `just shep heel 42` | pause (worktree + session preserved) |
 | `just shep resume 42` | `just shep send 42` | resume a paused task |
 | `just shep attach 42` | `just shep take 42` | **you step in** (see below) |

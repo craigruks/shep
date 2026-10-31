@@ -46,16 +46,25 @@ defmodule Shep.AgentRunner do
 
     send(orchestrator_pid, {:agent_meta, task.id, %{worktree_path: where, session_name: session}})
 
-    case ready_hook(workspace, config, resuming?) do
+    report = &report_step(orchestrator_pid, task.id, &1)
+
+    case ready_hook(workspace, config, resuming?, report) do
       :ok -> execute(workspace, resuming?, task, orchestrator_pid, config, started_at, where)
       {:error, reason} -> hook_failed(workspace, task, config, reason, started_at, where)
     end
   end
 
-  defp ready_hook(_workspace, _config, true), do: :ok
+  defp ready_hook(_workspace, _config, true, _report), do: :ok
 
-  defp ready_hook(workspace, config, false),
-    do: Workspace.run_hook(workspace, config, "on_worktree_ready")
+  defp ready_hook(workspace, config, false, report) do
+    report.("hook")
+    Workspace.run_hook(workspace, config, "on_worktree_ready")
+  end
+
+  # Which step the task is in, for `just shep ps`. Fire-and-forget, like
+  # every runner → orchestrator message; `Shep.Goal` reports the rest.
+  defp report_step(orchestrator_pid, task_id, step),
+    do: send(orchestrator_pid, {:agent_step, task_id, step})
 
   # A broken `on_worktree_ready` — dead network, OOM install, lost fetch
   # race — leaves a checkout the agent cannot work in. Fail before the
@@ -77,6 +86,7 @@ defmodule Shep.AgentRunner do
 
   defp execute(workspace, resuming?, task, orchestrator_pid, config, started_at, where) do
     max_turns = get_in(config, ["agent", "max_turns"]) || 10
+    report_step(orchestrator_pid, task.id, "agent")
 
     iterations =
       if resuming? do

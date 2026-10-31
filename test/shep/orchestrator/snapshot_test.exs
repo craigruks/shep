@@ -95,6 +95,24 @@ defmodule Shep.Orchestrator.SnapshotTest do
     assert second > first
   end
 
+  test "write projects the step; read renders elapsed for humans" do
+    claimed_at = System.monotonic_time(:millisecond) - 61_000
+    task = %Shep.Task{id: "s1", branch: "b", prompt: "p"}
+    entry = %{task: task, started_at: claimed_at, last_output_at: claimed_at, step: "verify 1/2"}
+
+    Snapshot.write(%Shep.Orchestrator{running: %{"s1" => entry}})
+
+    assert %{step: "verify 1/2", elapsed: "1m 01s"} = Snapshot.read().running["s1"]
+  end
+
+  test "format_elapsed pads minutes and seconds, adds hours past the hour" do
+    assert Snapshot.format_elapsed(nil) == nil
+    assert Snapshot.format_elapsed(-5) == "0s"
+    assert Snapshot.format_elapsed(45_999) == "45s"
+    assert Snapshot.format_elapsed(724_000) == "12m 04s"
+    assert Snapshot.format_elapsed(3_723_000) == "1h 02m 03s"
+  end
+
   test "write projects paused entries and the claimed set" do
     task = %Shep.Task{id: "s2", type: "custom", branch: "b", prompt: "p"}
 
