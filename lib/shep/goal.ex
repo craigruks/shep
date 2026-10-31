@@ -75,18 +75,19 @@ defmodule Shep.Goal do
         iteration = run_turn.(prompt)
 
         case iteration.completion do
-          %Shep.Completion.Failed{} = failed ->
-            failed
+          %Shep.Completion.Failed{reason: reason} ->
+            give_up(
+              task,
+              "agent gave up during verify fix #{attempt + 1}/#{max}: #{reason}",
+              iteration.stdout
+            )
 
           _ ->
             do_verify(final, task, ws, config, opid, verify_cmd, attempt + 1, max, run_turn)
         end
 
       {:error, out} ->
-        %Shep.Completion.Failed{
-          reason: "verify failed after #{max} fix attempts: #{tail(out, 400)}",
-          recoverable: false
-        }
+        give_up(task, "verify failed after #{max} fix attempts: `#{verify_cmd}`", out)
     end
   end
 
@@ -149,7 +150,8 @@ defmodule Shep.Goal do
         fix_and_repush(ctx, fix_prompt(:ci, attempt + 1, max, logs, nil))
 
       {:failed, reason} ->
-        give_up(task, "CI failed after #{attempt} fix attempts: #{reason}")
+        logs = Shep.CIWatch.failure_logs(repo, pr)
+        give_up(task, "CI failed after #{attempt} fix attempts: #{reason}", logs)
     end
   end
 
@@ -166,7 +168,7 @@ defmodule Shep.Goal do
         do_ci(final, repo, pr, task, ws, config, opid, attempt + 1, max, run_turn)
 
       {:error, push_err} ->
-        give_up(task, "push failed during CI fix: #{tail(push_err, 300)}")
+        give_up(task, "push failed during CI fix", push_err)
     end
   end
 
@@ -182,11 +184,10 @@ defmodule Shep.Goal do
     ]
   end
 
-  defp give_up(task, reason) do
-    Logger.error("Goal not reached for task #{task.id}: #{reason}")
-    Shep.Tracker.update_status(task.id, "failed")
-    Shep.Tracker.add_comment(task.id, "Goal not reached: #{reason}")
-    Shep.Notifier.notify_failure(task, reason)
+  # `output` is whatever ended the task (verify output, CI logs, a push
+  # error); its redacted tail rides the comment. nil when there is none.
+  defp give_up(task, reason, output \\ nil) do
+    Shep.FailureReport.post(task, reason, output)
     %Shep.Completion.Failed{reason: reason, recoverable: false}
   end
 
