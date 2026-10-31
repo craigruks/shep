@@ -24,6 +24,17 @@ You manage the *work*. Shep manages the *agents*.
 > An agent reading the manual for the tool that dispatches agents. Sure. Why
 > not. One rule: you may not create PRs yourself. Shep does that part.
 
+## Where Shep fits
+
+- **Small tasks, automated end to end.** Label an issue `shep` (plus
+  `shep:model:*` for a specific model) and Shep runs it to a PR in the
+  background, on whatever machine it lives on.
+- **Fleets.** Run Shep on each machine and each one owns its task through to
+  the PR. The model rides on the issue, so whichever dog fetches it knows
+  which agent to hand it to.
+- **Not the big stuff anymore.** Long-running work lives with a long-lived
+  orchestrator in the cloud. Shep herds the small flock.
+
 ## Why
 
 Nobody wants to babysit a coding agent.
@@ -430,6 +441,8 @@ which is exactly the file an arriving agent reads first.
 - **Not magic.** An agent that can't fix your flaky test still can't fix
   your flaky test. Shep just finds out without you watching.
 - **Not distributed.** One orchestrator, one machine, N agents.
+- **Not the main driver.** Big, long-running work belongs to a long-lived
+  orchestrator in the cloud. Shep takes the small, well-scoped tasks.
 - **Not a sandbox.** Agents run headless with permission prompts
   disabled, inside worktrees of your repo, with your credentials. Shep
   bounds *supervision* (timeouts, retries, kills), not *capability*.
