@@ -109,21 +109,23 @@ defmodule Shep.Config do
     end
   end
 
+  @doc """
+  Read and validate the workflow at `path` without a running server.
+
+  For one-shot CLI commands (`mix shep.doctor`) that need the config but
+  must not boot the application, and so must not start an orchestrator.
+  """
+  @spec load(Path.t()) :: {:ok, map()} | {:error, String.t()}
+  def load(path) when is_binary(path) do
+    with {:ok, raw} <- parse_workflow(path) do
+      Shep.Config.Schema.validate(raw)
+    end
+  end
+
   defp load_config(state) do
-    case parse_workflow(state.path) do
-      {:ok, raw} ->
-        case Shep.Config.Schema.validate(raw) do
-          {:ok, config} ->
-            stamp = file_stamp(state.path)
-            Logger.debug("Loaded WORKFLOW.md config")
-            {:ok, %{state | config: config, stamp: stamp}}
-
-          {:error, reason} ->
-            {:error, reason}
-        end
-
-      {:error, reason} ->
-        {:error, reason}
+    with {:ok, config} <- load(state.path) do
+      Logger.debug("Loaded WORKFLOW.md config")
+      {:ok, %{state | config: config, stamp: file_stamp(state.path)}}
     end
   end
 

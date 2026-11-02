@@ -57,6 +57,7 @@ command has a herding alias. Both hit the same handler.
 ```bash
 just shep build           #          build the mix release → bin/shep (run once, and after code changes)
 just shep smoke           # sniff:   boot the built binary, assert supervision tree is alive (hermetic)
+just shep doctor          # vet:     pre-flight: push auth, user.email, labels, agent CLI, workspace
 just shep up              # wake:    start daemon via bin/shep (background, idempotent)
 just shep down            # rest:    stop daemon gracefully (bin/shep stop)
 just shep restart         #          restart daemon in place (bin/shep restart)
@@ -246,6 +247,10 @@ Playbook:
   ~30s. A separate external stall detector on the runs log is no longer
   required — silence of BOTH milestones and heartbeats is the alarm,
   and the recurring watchdog has already killed a truly-dead task.
+- Before the first `up` on a repo (and after any config change), run
+  `SHEP_WORKFLOW=<path> just shep doctor`: it checks push auth, the
+  remote, `user.email`, labels, the agent CLI and the workspace, and
+  prints the fix command for each failure.
 - Push rejected with GH007: the target repo's `user.email` is private.
   Fix `git -C <workspace.repo> config user.email` to the noreply
   address. SSH agents do not reach the daemon; use

@@ -171,7 +171,10 @@ done
 # Optional: per-issue model overrides. Create one label per model you want
 # to reach for, e.g. gh label create shep:model:sonnet --repo you/your-repo
 
-# 3. Label an issue "shep" and release the hound
+# 3. Check push auth, user.email, labels, agent CLI and workspace
+just shep doctor      # or: just shep vet — prints the fix for every ✗
+
+# 4. Label an issue "shep" and release the hound
 just shep up          # or: just shep wake
 just shep view        # tmux: orchestrator + a pane per task, auto-spawning
 ```
@@ -187,11 +190,11 @@ concurrency, timeouts, or the tracker while Shep is running. No restarts.
 
 > [!NOTE]
 > The daemon pushes branches itself, and SSH agents (1Password, biometric)
-> do not reach a nohup'd process. Give it non-interactive push auth once:
-> `gh auth setup-git`, and if your remote uses SSH,
-> `git config url."https://github.com/<you>/".insteadOf "git@github.com:<you>/"`.
-> While you're in there, set the repo's `user.email` to your GitHub noreply
-> address, or GH007 email privacy will reject the daemon's first push.
+> do not reach a nohup'd process. It needs non-interactive push auth
+> (`gh auth setup-git`), an https push remote (or an `insteadOf` rewrite),
+> and a GitHub noreply `user.email`, or GH007 email privacy rejects its
+> first push. `just shep doctor` checks all three, plus labels, the agent
+> CLI and the workspace, and prints the exact fix command for each ✗.
 
 ```yaml
 tracker:   { kind: "github", repo: "you/your-repo" }
@@ -365,6 +368,7 @@ happier. We know which one that is.
 | canonical | herding | what happens |
 |---|---|---|
 | `just shep demo` | `just shep trial` | full loop with a stub agent, zero setup |
+| `just shep doctor` | `just shep vet` | pre-flight: push auth, email, labels, agent CLI, workspace |
 | `just shep up` | `just shep wake` | start the orchestrator (background) |
 | `just shep down` | `just shep rest` | stop it |
 | `just shep run 42` | `just shep fetch 42` | dispatch an agent on issue 42 |
