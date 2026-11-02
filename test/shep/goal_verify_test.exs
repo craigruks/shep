@@ -1,7 +1,19 @@
 defmodule Shep.GoalVerifyLoopTest do
-  use ExUnit.Case, async: true
+  # A give-up posts to the tracker, so the Memory adapter is installed
+  # globally and this module must not run concurrently with others.
+  use ExUnit.Case, async: false
 
   alias Shep.Completion.{Complete, Failed}
+  alias Shep.Tracker.Memory
+
+  @fake_token "ghp_" <> String.duplicate("A1b2C3d4", 5)
+
+  setup do
+    start_supervised!({Memory, tasks: []})
+    Application.put_env(:shep, :tracker_adapter, Memory)
+    on_exit(fn -> Application.delete_env(:shep, :tracker_adapter) end)
+    :ok
+  end
 
   defp tmp_dir do
     dir = Path.join(System.tmp_dir!(), "shep_verify_#{System.unique_integer([:positive])}")
@@ -54,17 +66,44 @@ defmodule Shep.GoalVerifyLoopTest do
     assert_received {:agent_output, "v2", _line}
   end
 
-  test "exhausted fix attempts yield Failed with the verify tail" do
+  test "exhausted fix attempts fail the task: shep:failed plus the redacted verify tail" do
     dir = tmp_dir()
     agent = stub_agent(dir, "echo still broken")
     final = %Complete{summary: "done"}
     task = %Shep.Task{id: "v3", branch: "b", prompt: "p"}
+    verify_cmd = "echo 'assertion nope'; echo 'GITHUB_TOKEN=#{@fake_token}'; false"
 
     assert %Failed{reason: reason, recoverable: false} =
-             verify(final, task, dir, config("echo nope; false", agent, 2))
+             verify(final, task, dir, config(verify_cmd, agent, 2))
 
     assert reason =~ "verify failed after 2 fix attempts"
-    assert reason =~ "nope"
+    assert "failed" == Memory.get_status("v3")
+    assert [comment] = Memory.get_comments("v3")
+    assert comment =~ "Goal not reached: verify failed after 2 fix attempts"
+    assert comment =~ "<details>"
+    assert comment =~ "assertion nope"
+    assert comment =~ "GITHUB_TOKEN=[REDACTED]"
+    refute comment =~ @fake_token
+  end
+
+  test "an agent that gives up during a verify fix fails the task with its output" do
+    dir = tmp_dir()
+
+    agent =
+      stub_agent(
+        dir,
+        ~S(echo 'cannot fix this'; echo '<completion>{"type":"failed","reason":"flaky env","recoverable":false}</completion>')
+      )
+
+    task = %Shep.Task{id: "v7", branch: "b", prompt: "p"}
+
+    assert %Failed{reason: reason} =
+             verify(%Complete{summary: "done"}, task, dir, config("false", agent, 2))
+
+    assert reason =~ "agent gave up during verify fix 1/2: flaky env"
+    assert "failed" == Memory.get_status("v7")
+    assert [comment] = Memory.get_comments("v7")
+    assert comment =~ "cannot fix this"
   end
 
   test "demo tasks skip the verify loop entirely" do

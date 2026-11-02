@@ -112,8 +112,10 @@ defmodule Shep.GoalCILoopTest do
     assert_received {:agent_output, "ci-2", _line}
   end
 
-  test "red CI exhausting ci_fixes returns Failed and exercises the give-up path" do
-    CIWatchStub.install([{:failed, "Quality"}, {:failed, "Quality"}])
+  test "red CI exhausting ci_fixes fails the task: shep:failed plus the redacted log tail" do
+    token = "sk-ant-" <> String.duplicate("x9Y8z7", 6)
+    logs = "quality\tRun mix test\n  1) test boom (ShepTest)\nANTHROPIC_API_KEY=#{token}"
+    CIWatchStub.install([{:failed, "Quality"}, {:failed, "Quality"}], logs)
     {wt, _bare} = git_worktree_with_remote("shep/ci-3")
     agent = stub_agent(wt, "echo tried a fix")
     final = %Complete{summary: "done"}
@@ -125,7 +127,11 @@ defmodule Shep.GoalCILoopTest do
     assert reason =~ "CI failed after 1 fix attempts"
     assert reason =~ "Quality"
     assert "failed" == Memory.get_status("ci-3")
-    assert ["Goal not reached: " <> _] = Memory.get_comments("ci-3")
+    assert ["Goal not reached: " <> _ = comment] = Memory.get_comments("ci-3")
+    assert comment =~ "<details>"
+    assert comment =~ "1) test boom (ShepTest)"
+    assert comment =~ "ANTHROPIC_API_KEY=[REDACTED]"
+    refute comment =~ token
   end
 
   test "codex tasks skip fix turns and fail straight through on red CI" do

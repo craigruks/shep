@@ -97,7 +97,7 @@ defmodule Shep.AgentRunner do
         execute_turns(prompt, workspace, task, orchestrator_pid, max_turns, config)
       end
 
-    final = resolve_completion(iterations)
+    final = iterations |> resolve_completion() |> report_agent_failure(task, iterations)
     run_turn = fn prompt -> fix_turn(prompt, workspace, task, config, orchestrator_pid) end
 
     final = Shep.Goal.verify_loop(final, task, workspace, config, orchestrator_pid, run_turn)
@@ -266,6 +266,22 @@ defmodule Shep.AgentRunner do
       true -> %Shep.Completion.Failed{reason: "exit code #{last.exit_code}", recoverable: true}
     end
   end
+
+  # The agent itself failed (signalled failure, crashed, idled out, ran
+  # out of turns): no goal loop will run, so this is the last chance to
+  # move the issue off `shep:in-progress` and say why.
+  defp report_agent_failure(%Shep.Completion.Failed{reason: reason} = final, task, iterations) do
+    output =
+      case List.last(iterations) do
+        %Shep.IterationResult{stdout: stdout} -> stdout
+        nil -> nil
+      end
+
+    Shep.FailureReport.post(task, "agent failed: #{reason}", output)
+    final
+  end
+
+  defp report_agent_failure(final, _task, _iterations), do: final
 
   @doc "Run a single fix turn: continue the agent session with a new prompt."
   @spec fix_turn(String.t(), Workspace.t(), Shep.Task.t(), map(), pid()) ::
