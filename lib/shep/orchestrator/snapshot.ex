@@ -20,7 +20,8 @@ defmodule Shep.Orchestrator.Snapshot do
   @doc """
   Read the latest snapshot, or an empty projection if none written yet.
 
-  Enriches each running task with `elapsed_ms`/`idle_ms`, computed here
+  Enriches each running task with `elapsed_ms`/`idle_ms` (and `elapsed`,
+  the human-readable form of `elapsed_ms`), computed here
   against the daemon's `System.monotonic_time` so the deltas are valid.
   The stored `started_at`/`last_output_at` are per-VM monotonic stamps;
   computing the deltas on the read side (which runs on the daemon node via
@@ -41,9 +42,12 @@ defmodule Shep.Orchestrator.Snapshot do
 
     enriched =
       Map.new(running, fn {id, entry} ->
+        elapsed_ms = delta(now, entry[:started_at])
+
         {id,
          Map.merge(entry, %{
-           elapsed_ms: delta(now, entry[:started_at]),
+           elapsed_ms: elapsed_ms,
+           elapsed: format_elapsed(elapsed_ms),
            idle_ms: delta(now, entry[:last_output_at])
          })}
       end)
@@ -55,6 +59,25 @@ defmodule Shep.Orchestrator.Snapshot do
 
   defp delta(_now, nil), do: nil
   defp delta(now, stamp) when is_integer(stamp), do: now - stamp
+
+  @doc """
+  Render a millisecond duration for humans: `45s`, `12m 04s`, `1h 02m 03s`.
+  `nil` (no stamp to measure from) stays `nil`.
+  """
+  @spec format_elapsed(integer() | nil) :: String.t() | nil
+  def format_elapsed(nil), do: nil
+
+  def format_elapsed(ms) when is_integer(ms) do
+    s = div(max(ms, 0), 1000)
+
+    case {div(s, 3600), rem(div(s, 60), 60), rem(s, 60)} do
+      {0, 0, sec} -> "#{sec}s"
+      {0, min, sec} -> "#{min}m #{pad(sec)}s"
+      {h, min, sec} -> "#{h}h #{pad(min)}m #{pad(sec)}s"
+    end
+  end
+
+  defp pad(n), do: n |> Integer.to_string() |> String.pad_leading(2, "0")
 
   @doc "Project and store the orchestrator state for zero-contention reads."
   @spec write(struct()) :: :ok
@@ -69,6 +92,7 @@ defmodule Shep.Orchestrator.Snapshot do
              agent: entry.task.agent,
              location: entry.task.location,
              model: Map.get(entry, :model),
+             step: Map.get(entry, :step),
              started_at: entry.started_at,
              last_output_at: entry.last_output_at,
              worktree_path: Map.get(entry, :worktree_path),

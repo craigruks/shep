@@ -5,6 +5,7 @@
 #   ---------        -------------    ------
 #   demo             trial            full loop with a stub agent, zero setup
 #   build            -                build the mix release → bin/shep (run once, and after code changes)
+#   doctor           vet              check push auth, email, labels, agent CLI, workspace
 #   up               wake             start daemon via bin/shep (background, idempotent)
 #   down             rest             stop daemon gracefully (bin/shep stop)
 #   restart          -                restart daemon in place (bin/shep restart)
@@ -51,6 +52,7 @@ shep cmd id="":
     trial)   CMD=demo ;;
     sniff)   CMD=smoke ;;
     whistle) CMD=console ;;
+    vet)     CMD=doctor ;;
     *)       CMD="{{cmd}}" ;;
   esac
 
@@ -170,6 +172,12 @@ shep cmd id="":
       ;;
     start)
       iex -S mix
+      ;;
+    doctor)
+      # Pre-flight for the active WORKFLOW.md (SHEP_WORKFLOW respected):
+      # the push-auth, email and label traps that otherwise surface only
+      # on the daemon's first push. Non-zero exit unless every check passes.
+      mix shep.doctor
       ;;
     run)
       need_id
@@ -322,6 +330,7 @@ shep cmd id="":
       echo "  demo             trial            full loop with a stub agent, zero setup"
       echo "  build            -                build the mix release → bin/shep (+ smoke)"
       echo "  smoke            sniff            boot the built binary; assert the tree is alive"
+      echo "  doctor           vet              pre-flight: push auth, email, labels, agent CLI, workspace"
       echo "  up               wake             start daemon via bin/shep (background)"
       echo "  down             rest             stop daemon gracefully"
       echo "  restart          -                restart daemon in place"

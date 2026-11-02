@@ -24,6 +24,17 @@ You manage the *work*. Shep manages the *agents*.
 > An agent reading the manual for the tool that dispatches agents. Sure. Why
 > not. One rule: you may not create PRs yourself. Shep does that part.
 
+## Where Shep fits
+
+- **Small tasks, automated end to end.** Label an issue `shep` (plus
+  `shep:model:*` for a specific model) and Shep runs it to a PR in the
+  background, on whatever machine it lives on.
+- **Fleets.** Run Shep on each machine and each one owns its task through to
+  the PR. The model rides on the issue, so whichever dog fetches it knows
+  which agent to hand it to.
+- **Not the big stuff anymore.** Long-running work lives with a long-lived
+  orchestrator in the cloud. Shep herds the small flock.
+
 ## Why
 
 Nobody wants to babysit a coding agent.
@@ -91,7 +102,7 @@ never met your bugs.
         │ labels move:          │ retry w/ backoff           │
         │ shep:in-progress      │ idle watchdog              │
         │ shep:in-review  ◄─────┴──── CI passed ◄────────────┘
-        │ shep:failed     ◄────────── CI failed (fix turns + Slack)
+        │ shep:failed     ◄────────── agent, verify or CI failed (comment + Slack)
 ```
 
 One `Task.Supervisor` child per issue. Each agent gets:
@@ -113,8 +124,11 @@ One `Task.Supervisor` child per issue. Each agent gets:
    in the worktree; failures go back to the same session for a fix turn
    before any PR exists. Once the PR is up, red CI sends the failing
    check logs back to the session, the fix gets pushed, CI re-runs.
-   Attempts are capped; exhaustion means `shep:failed`, a preserved
-   worktree, and a Slack ping.
+   Attempts are capped; exhaustion (or an agent that fails outright)
+   means `shep:failed`, a preserved worktree, a Slack ping, and a comment
+   on the issue with the reason and the last ~30 lines of the output that
+   ended the task, collapsed and redacted (anything token-shaped becomes
+   `[REDACTED]`, since the comment is public).
 
    Green means a check actually reported, never "nothing is failing":
    GitHub builds no check suites for a PR it cannot merge, so a
@@ -160,7 +174,10 @@ done
 # Optional: per-issue model overrides. Create one label per model you want
 # to reach for, e.g. gh label create shep:model:sonnet --repo you/your-repo
 
-# 3. Label an issue "shep" and release the hound
+# 3. Check push auth, user.email, labels, agent CLI and workspace
+just shep doctor      # or: just shep vet — prints the fix for every ✗
+
+# 4. Label an issue "shep" and release the hound
 just shep up          # or: just shep wake
 just shep view        # tmux: orchestrator + a pane per task, auto-spawning
 ```
@@ -176,11 +193,11 @@ concurrency, timeouts, or the tracker while Shep is running. No restarts.
 
 > [!NOTE]
 > The daemon pushes branches itself, and SSH agents (1Password, biometric)
-> do not reach a nohup'd process. Give it non-interactive push auth once:
-> `gh auth setup-git`, and if your remote uses SSH,
-> `git config url."https://github.com/<you>/".insteadOf "git@github.com:<you>/"`.
-> While you're in there, set the repo's `user.email` to your GitHub noreply
-> address, or GH007 email privacy will reject the daemon's first push.
+> do not reach a nohup'd process. It needs non-interactive push auth
+> (`gh auth setup-git`), an https push remote (or an `insteadOf` rewrite),
+> and a GitHub noreply `user.email`, or GH007 email privacy rejects its
+> first push. `just shep doctor` checks all three, plus labels, the agent
+> CLI and the workspace, and prints the exact fix command for each ✗.
 
 ```yaml
 tracker:   { kind: "github", repo: "you/your-repo" }
@@ -195,6 +212,24 @@ staging:   { base_branch: "staging", pr_target: "staging" }
 `agent.model` is the fleet default; a `shep:model:<name>` label on an issue
 beats it for that issue alone, and `just shep ps` reports the agent, model, and
 location each running task is on.
+
+`just shep ps` also says how long each running task has been at it and what
+it is doing right now, so with three tasks in flight you can see which one
+is stuck:
+
+```json
+"99": { "step": "verify 2/2", "elapsed": "12m 04s", "elapsed_ms": 724113, "idle_ms": 3020, ... }
+```
+
+- `elapsed`: time since the task was claimed (`45s`, `12m 04s`, `1h 02m 03s`).
+- `step`: `hook` (`on_worktree_ready`), `agent`, `verify`, `ci_wait` or
+  `ci_fix`. Once a fix round starts, the round rides along: `verify 2/2` is
+  the last fix the verify loop allows, `ci_wait 1/2` is CI re-running after
+  the first CI fix. `null` until the workspace is ready.
+
+Every step change also lands in `.shep/orchestrator.log` as
+`task 99 step: verify 2/2 (elapsed 12m 04s)`, which is how it reaches the
+orchestrator pane of `just shep view`.
 
 Two independent axes: **what** runs (`shep:codex`, `shep:model:…`) and **where**
 it runs (`shep:sandbox` → a Vercel sandbox instead of a local worktree). They
@@ -336,11 +371,12 @@ happier. We know which one that is.
 | canonical | herding | what happens |
 |---|---|---|
 | `just shep demo` | `just shep trial` | full loop with a stub agent, zero setup |
+| `just shep doctor` | `just shep vet` | pre-flight: push auth, email, labels, agent CLI, workspace |
 | `just shep up` | `just shep wake` | start the orchestrator (background) |
 | `just shep down` | `just shep rest` | stop it |
 | `just shep run 42` | `just shep fetch 42` | dispatch an agent on issue 42 |
 | `just shep queue` | `just shep pen` | list templates + queued candidates |
-| `just shep ps` | `just shep flock` | status JSON: running, paused, claimed |
+| `just shep ps` | `just shep flock` | status JSON: running (with step + elapsed), paused, claimed |
 | `just shep pause 42` | `just shep heel 42` | pause (worktree + session preserved) |
 | `just shep resume 42` | `just shep send 42` | resume a paused task |
 | `just shep attach 42` | `just shep take 42` | **you step in** (see below) |
@@ -370,7 +406,7 @@ labels and logs.
 | `shep:in-progress` | claimed, agent running |
 | `shep:pr-created` | branch pushed, PR open |
 | `shep:in-review` | CI green; a human should look |
-| `shep:failed` | goal not reached after capped fix attempts; reason posted as a comment |
+| `shep:failed` | goal not reached: verify or CI fix attempts exhausted, or the agent failed; reason and redacted output tail posted as a comment |
 | `shep:promoted` | shipped |
 | `shep:codex` | route this issue to Codex instead of Claude |
 | `shep:model:<name>` | run this issue on a specific model, overriding `agent.model` (works for Codex too) |
@@ -430,6 +466,8 @@ which is exactly the file an arriving agent reads first.
 - **Not magic.** An agent that can't fix your flaky test still can't fix
   your flaky test. Shep just finds out without you watching.
 - **Not distributed.** One orchestrator, one machine, N agents.
+- **Not the main driver.** Big, long-running work belongs to a long-lived
+  orchestrator in the cloud. Shep takes the small, well-scoped tasks.
 - **Not a sandbox.** Agents run headless with permission prompts
   disabled, inside worktrees of your repo, with your credentials. Shep
   bounds *supervision* (timeouts, retries, kills), not *capability*.

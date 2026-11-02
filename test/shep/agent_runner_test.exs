@@ -248,3 +248,78 @@ defmodule Shep.AgentRunnerHookGateTest do
     assert %Shep.Completion.Complete{} = result.completion
   end
 end
+
+defmodule Shep.AgentRunnerFailureReportTest do
+  @moduledoc """
+  Coverage for #98: an agent that fails outright must move its issue to
+  `shep:failed` and say why, not leave it at `shep:in-progress` forever.
+
+  Drives the real `run/3` against a git repo and a stub agent, with the
+  Memory tracker standing in at the network boundary.
+  """
+  # Installs the global :tracker_adapter.
+  use ExUnit.Case, async: false
+
+  alias Shep.Tracker.Memory
+
+  setup do
+    start_supervised!({Memory, tasks: []})
+    Application.put_env(:shep, :tracker_adapter, Memory)
+    on_exit(fn -> Application.delete_env(:shep, :tracker_adapter) end)
+
+    n = System.unique_integer([:positive])
+    dir = Path.join(System.tmp_dir!(), "shep_agentfail_#{n}")
+    File.mkdir_p!(Path.join(dir, "repo"))
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    repo = Path.join(dir, "repo")
+
+    for args <- [
+          ["init", "-q", "-b", "main"],
+          ["config", "user.email", "test@example.com"],
+          ["config", "user.name", "Test"],
+          ["commit", "-q", "--allow-empty", "-m", "init"]
+        ] do
+      {_, 0} = System.cmd("git", ["-C", repo | args], stderr_to_stdout: true)
+    end
+
+    %{n: n, dir: dir, repo: repo}
+  end
+
+  defp run(ctx, agent_body, demo \\ false) do
+    agent = Path.join(ctx.dir, "agent.sh")
+    File.write!(agent, "#!/bin/sh\n" <> agent_body <> "\n")
+    File.chmod!(agent, 0o755)
+
+    config = %{
+      "workspace" => %{"repo" => ctx.repo, "root" => Path.join(ctx.dir, "worktrees")},
+      "agent" => %{"command" => agent, "max_turns" => 1, "idle_timeout_ms" => 30_000}
+    }
+
+    id = "af-#{ctx.n}"
+    task = %Shep.Task{id: id, branch: "shep/#{id}", base_branch: "main", prompt: "p", demo: demo}
+    {id, Shep.AgentRunner.run(task, self(), %{config: config})}
+  end
+
+  test "an agent that exits non-zero fails the issue with its redacted output tail", ctx do
+    token = "github_pat_" <> String.duplicate("Zq7", 10)
+    {id, result} = run(ctx, "echo 'compiling'; echo 'auth with #{token} rejected'; exit 3")
+
+    assert %Shep.Completion.Failed{reason: "exit code 3"} = result.completion
+    assert "failed" == Memory.get_status(id)
+    assert [comment] = Memory.get_comments(id)
+    assert comment =~ "Goal not reached: agent failed: exit code 3"
+    assert comment =~ "<details>"
+    assert comment =~ "auth with [REDACTED] rejected"
+    refute comment =~ token
+  end
+
+  # A demo task, so no push or PR is attempted against the remote-less repo.
+  test "an agent that completes leaves the issue alone", ctx do
+    {id, result} = run(ctx, "echo working", true)
+
+    assert %Shep.Completion.Complete{} = result.completion
+    refute Memory.get_status(id) == "failed"
+    assert [] == Memory.get_comments(id)
+  end
+end

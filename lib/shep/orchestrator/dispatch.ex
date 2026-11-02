@@ -3,7 +3,7 @@ defmodule Shep.Orchestrator.Dispatch do
 
   require Logger
 
-  alias Shep.Orchestrator.Poller
+  alias Shep.Orchestrator.{Poller, Snapshot}
 
   @base_retry_delay_ms 10_000
   @max_retry_delay_ms 300_000
@@ -79,6 +79,26 @@ defmodule Shep.Orchestrator.Dispatch do
     }
 
     Poller.arm_watchdog(task.id, %{state | running: Map.put(state.running, task.id, entry)})
+  end
+
+  @doc """
+  Record the step a running task reported (`hook`, `agent`, `verify 1/2`, …).
+
+  A transition is rare and is what an operator asks about, so it also
+  leaves one log line, which is how it reaches the orchestrator pane of
+  `just shep view`. A report from a task no longer running is dropped.
+  """
+  @spec record_step(String.t(), String.t(), struct()) :: struct()
+  def record_step(task_id, step, state) when is_binary(step) do
+    case Map.get(state.running, task_id) do
+      nil ->
+        state
+
+      entry ->
+        elapsed = System.monotonic_time(:millisecond) - entry.started_at
+        Logger.info("task #{task_id} step: #{step} (elapsed #{Snapshot.format_elapsed(elapsed)})")
+        %{state | running: Map.put(state.running, task_id, Map.put(entry, :step, step))}
+    end
   end
 
   @doc "Clean up retry state for a task."

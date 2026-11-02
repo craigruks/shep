@@ -18,11 +18,13 @@ defmodule Mix.Tasks.Shep.Status do
   @doc """
   Project a daemon snapshot into the reportable JSON shape.
 
-  `elapsed_ms`/`idle_ms` are passed through verbatim from the snapshot,
+  `elapsed_ms`/`elapsed`/`idle_ms` are passed through verbatim from the snapshot,
   which computes them daemon-side against a valid monotonic origin. This
   task never subtracts monotonic timestamps itself: a control-VM query
   has no shared origin with the daemon, so any local subtraction would be
-  meaningless (and often negative).
+  meaningless (and often negative). `step` is the phase the task is in
+  (`hook`, `agent`, `verify`, `ci_wait`, `ci_fix`, with `k/max` once a
+  fix round is under way), `nil` until its workspace is ready.
   """
   @spec project(map()) :: map()
   def project(snapshot) do
@@ -34,6 +36,8 @@ defmodule Mix.Tasks.Shep.Status do
            agent: info[:agent] || :claude,
            location: info[:location] || :local,
            model: info[:model],
+           step: info[:step],
+           elapsed: info[:elapsed],
            elapsed_ms: info[:elapsed_ms],
            idle_ms: info[:idle_ms]
          }}

@@ -75,6 +75,20 @@ defmodule Shep.Orchestrator.DispatchTest do
       assert after_exit.running == %{}
     end
   end
+
+  describe "record_step/3" do
+    test "stores the reported step on the running entry" do
+      e = Map.put(entry("t6"), :started_at, System.monotonic_time(:millisecond))
+      state = %Shep.Orchestrator{running: %{"t6" => e}}
+
+      assert %{step: "ci_wait"} = Dispatch.record_step("t6", "ci_wait", state).running["t6"]
+    end
+
+    test "drops a report from a task that is no longer running" do
+      state = %Shep.Orchestrator{}
+      assert Dispatch.record_step("gone", "agent", state) == state
+    end
+  end
 end
 
 defmodule Shep.Orchestrator.DispatchWiringTest do
